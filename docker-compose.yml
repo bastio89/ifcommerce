@@ -1,0 +1,108 @@
+# =============================================================================
+# DecideCommerce – komplette Plattform mit einem Befehl:
+#
+#   docker compose up --build
+#
+# Frontend:  http://localhost:3000
+# API:       http://localhost:8000  (OpenAPI: /docs)
+# Postgres:  localhost:5432
+#
+# Alle Werte haben lokale Defaults. Für Staging/Produktion .env.example nach .env
+# kopieren und mindestens Passwörter, Secrets und öffentliche URLs setzen.
+# =============================================================================
+name: decidecommerce
+
+x-database-url: &database-url "postgresql://${POSTGRES_USER:-decide}:${POSTGRES_PASSWORD:-decide_local_only}@postgres:5432/${POSTGRES_DB:-decidecommerce}"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-decide}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-decide_local_only}
+      POSTGRES_DB: ${POSTGRES_DB:-decidecommerce}
+    ports:
+      # Standardmäßig nur lokal erreichbar; POSTGRES_BIND=0.0.0.0 für Fernzugriff.
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [internal]
+
+  # Einmaliger Job: wendet die Prisma-Migrationen an und beendet sich.
+  migrate:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: migrator
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_URL: *database-url
+      DECISION_ENGINE: ${DECISION_ENGINE:-auto}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
+      ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-low}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_METER_EVENT_NAME: ${STRIPE_METER_EVENT_NAME:-decidecommerce_ticket_analyzed}
+      FREE_TIER_MONTHLY_LIMIT: ${FREE_TIER_MONTHLY_LIMIT:-250}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change-me-internal-secret}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
+      WEB_CONCURRENCY: ${BACKEND_WORKERS:-2}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      target: runner
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: *database-url
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      BACKEND_INTERNAL_URL: http://backend:8000
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change-me-internal-secret}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PRICE_PRO_BASE: ${STRIPE_PRICE_PRO_BASE:-}
+      STRIPE_PRICE_PRO_METERED: ${STRIPE_PRICE_PRO_METERED:-}
+      FREE_TIER_MONTHLY_LIMIT: ${FREE_TIER_MONTHLY_LIMIT:-250}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  internal:
+
+volumes:
+  postgres-data:

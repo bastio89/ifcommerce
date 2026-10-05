@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 METERED_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/v1/analyze-ticket"): "ANALYZE_TICKET",
 }
-PROTECTED_PATHS = frozenset(path for _, path in METERED_ROUTES)
 
 
 async def _send_json(send: Send, status: int, code: str, message: str, headers: dict[str, str] | None = None) -> None:
@@ -58,7 +57,9 @@ class ApiKeyAuthMiddleware:
         self._container_getter = container_getter
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["path"].rstrip("/") not in PROTECTED_PATHS or scope["method"] == "OPTIONS":
+        operation = METERED_ROUTES.get((scope.get("method", ""), scope.get("path", "").rstrip("/")))
+        if scope["type"] != "http" or operation is None:
+            # Nicht geschützt (inkl. CORS-Preflight und falscher Methoden -> 405 vom Router).
             await self.app(scope, receive, send)
             return
 
@@ -109,7 +110,6 @@ class ApiKeyAuthMiddleware:
 
         state = scope.setdefault("state", {})
         state["tenant"] = tenant
-        operation = METERED_ROUTES[(scope["method"], scope["path"].rstrip("/"))]
 
         async def metering_send(message: Message) -> None:
             if message["type"] == "http.response.start" and 200 <= message["status"] < 300:

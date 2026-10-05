@@ -107,6 +107,11 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if settings.environment == "production" and (
+            settings.internal_api_secret is None
+            or settings.internal_api_secret.get_secret_value().startswith("change-me")
+        ):
+            logger.warning("INTERNAL_API_SECRET nutzt den Default – vor dem Livegang ein Zufalls-Secret setzen.")
         container = await container_factory(settings)
         app.state.container = container
         if container.usage_reporter is not None:

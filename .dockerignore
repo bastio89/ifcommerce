@@ -1,0 +1,13 @@
+# Build-Kontext des Frontends ist das Repo-Root – nur das Nötige hineinkopieren.
+**/node_modules
+**/.next
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+frontend/src/generated
+.git
+**/.env
+**/.env.*
+!.env.example
+*.log

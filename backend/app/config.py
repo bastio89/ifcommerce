@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Query-Parameter, die nur Prisma versteht. asyncpg würde sie als
 # Postgres-Laufzeitparameter senden und mit einem Fehler abbrechen.
@@ -59,7 +59,8 @@ class Settings(BaseSettings):
     # --- Sicherheit / Plattform ---
     # Geteiltes Secret zwischen Next.js-Server und Backend (Live-Demo-Proxy).
     internal_api_secret: SecretStr | None = None
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # NoDecode: Wert kommt als "*" oder "https://a.de,https://b.de", nicht als JSON.
+    cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
     api_key_cache_ttl_seconds: float = 15.0
     rate_limit_secret_key_per_minute: int = 600
     rate_limit_publishable_key_per_minute: int = 60

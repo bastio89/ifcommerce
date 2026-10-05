@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { z } from "zod";
 
+import { env } from "@/lib/env";
+
 export function jsonError(status: number, code: string, message: string, headers?: HeadersInit) {
   return NextResponse.json({ error: { code, message } }, { status, headers });
 }
@@ -12,9 +14,12 @@ export function jsonError(status: number, code: string, message: string, headers
 export function isSameOrigin(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return false;
-  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
   try {
-    return new URL(origin).host === host;
+    const parsed = new URL(origin);
+    // Öffentliche App-URL (hinter Reverse-Proxies) oder der vom Proxy gemeldete Host.
+    if (parsed.origin === new URL(env().APP_URL).origin) return true;
+    const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host");
+    return parsed.host === host;
   } catch {
     return false;
   }

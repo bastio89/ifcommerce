@@ -171,3 +171,11 @@ def test_demo_endpoint_requires_internal_secret_and_is_not_metered(client: TestC
     assert response.status_code == 200
     assert response.json()["category"] == "PRODUCT_ISSUE"
     assert db.fetchval("SELECT count(*) FROM usage_logs") == before
+
+
+def test_wrong_method_is_405_not_500(client: TestClient, db: Db) -> None:
+    tenant_id = db.create_tenant()
+    raw_key, _ = db.create_api_key(tenant_id)
+    response = client.get("/api/v1/analyze-ticket", headers={"x-api-key": raw_key})
+    assert response.status_code == 405
+    assert response.json()["error"]["code"] == "method_not_allowed"
