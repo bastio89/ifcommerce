@@ -1,0 +1,28 @@
+# Abhängigkeiten & Builds
+node_modules/
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+frontend/src/generated/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets & lokale Umgebungen
+.env
+.env.*
+!.env.example
+
+# System / Editor
+.DS_Store
+*.log
+.idea/
+.vscode/

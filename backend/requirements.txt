@@ -1,0 +1,8 @@
+# Laufzeit-Abhängigkeiten der DecideCommerce Decision API (exakt gepinnt)
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+asyncpg==0.31.0
+anthropic==1.11.0
+stripe==16.0.0

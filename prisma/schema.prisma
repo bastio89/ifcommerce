@@ -1,0 +1,174 @@
+// =============================================================================
+// DecideCommerce – Single Source of Truth für das Datenbankschema.
+//
+// * Migrationen:   prisma migrate (siehe /frontend/prisma.config.ts)
+// * Next.js:       typisierter Prisma Client (Dashboard, Auth, API-Keys, Billing)
+// * FastAPI:       liest/schreibt dieselben Tabellen über asyncpg (Hot Path)
+//
+// Konventionen, damit beide Laufzeiten sauber zusammenarbeiten:
+// * snake_case-Tabellen und -Spalten via @@map/@map
+// * UUID-Primärschlüssel mit DB-Default gen_random_uuid() (auch für Raw-SQL-Inserts)
+// * alle Zeitstempel als timestamptz
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../frontend/src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+/// Spiegelt den Stripe-Subscription-Status 1:1 (plus NONE für Free-Tenants).
+enum SubscriptionStatus {
+  NONE
+  INCOMPLETE
+  INCOMPLETE_EXPIRED
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+  PAUSED
+}
+
+enum ApiKeyType {
+  /// Server-zu-Server (Helpdesk, Backend des Shops). Niemals im Browser einsetzen.
+  SECRET
+  /// Für das Browser-Widget. Nur von freigegebenen Origins nutzbar, stärker rate-limitiert.
+  PUBLISHABLE
+}
+
+enum OperationType {
+  ANALYZE_TICKET
+}
+
+enum TicketCategory {
+  WHERE_IS_MY_ORDER
+  RETURN_OR_REFUND
+  PRODUCT_ISSUE
+  PAYMENT_OR_INVOICE
+  GENERAL_INQUIRY
+}
+
+enum UserRole {
+  OWNER
+  MEMBER
+}
+
+/// Ein Mandant = ein Händler/Shop.
+model Tenant {
+  id                           String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                         String
+  shopUrl                      String?            @map("shop_url")
+  shopPlatform                 String?            @map("shop_platform")
+  plan                         Plan               @default(FREE)
+  stripeCustomerId             String?            @unique @map("stripe_customer_id")
+  stripeSubscriptionId         String?            @unique @map("stripe_subscription_id")
+  subscriptionStatus           SubscriptionStatus @default(NONE) @map("subscription_status")
+  subscriptionCurrentPeriodEnd DateTime?          @map("subscription_current_period_end") @db.Timestamptz(3)
+  /// Zeitpunkt des zuletzt angewendeten Stripe-Events (Schutz gegen Out-of-Order-Events).
+  subscriptionUpdatedAt        DateTime?          @map("subscription_updated_at") @db.Timestamptz(3)
+  createdAt                    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                    DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  users     User[]
+  apiKeys   ApiKey[]
+  usageLogs UsageLog[]
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  email        String   @unique
+  name         String?
+  passwordHash String   @map("password_hash")
+  role         UserRole @default(OWNER)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sessions Session[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+/// Serverseitige Dashboard-Sessions (nur der SHA-256-Hash des Tokens wird gespeichert).
+model Session {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+/// API-Schlüssel – gespeichert wird ausschließlich der SHA-256-Hash.
+model ApiKey {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String     @map("tenant_id") @db.Uuid
+  name           String
+  type           ApiKeyType @default(SECRET)
+  keyHash        String     @unique @map("key_hash")
+  /// Sichtbarer Anfang des Schlüssels (z. B. "dc_sk_Ab3x") zur Wiedererkennung im Dashboard.
+  prefix         String
+  last4          String     @map("last4")
+  /// Nur für PUBLISHABLE-Keys: erlaubte Browser-Origins (z. B. "https://mein-shop.de").
+  allowedOrigins String[]   @default([]) @map("allowed_origins")
+  lastUsedAt     DateTime?  @map("last_used_at") @db.Timestamptz(3)
+  revokedAt      DateTime?  @map("revoked_at") @db.Timestamptz(3)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  usageLogs UsageLog[]
+
+  @@index([tenantId])
+  @@map("api_keys")
+}
+
+/// Verbrauchsmessung: ein Eintrag pro erfolgreicher KI-Analyse.
+model UsageLog {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  apiKeyId         String?         @map("api_key_id") @db.Uuid
+  timestamp        DateTime        @default(now()) @db.Timestamptz(3)
+  operationType    OperationType   @map("operation_type")
+  /// Nicht-personenbezogene Metadaten für Dashboard-Auswertungen.
+  category         TicketCategory?
+  urgency          Int?            @db.SmallInt
+  engine           String?
+  latencyMs        Int?            @map("latency_ms")
+  /// true, wenn der Eintrag über Stripe (Pro, Usage-Based) abgerechnet wird.
+  billable         Boolean         @default(false)
+  stripeReportedAt DateTime?       @map("stripe_reported_at") @db.Timestamptz(3)
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, timestamp])
+  @@index([billable, stripeReportedAt])
+  @@map("usage_logs")
+}
+
+/// Idempotenz für Stripe-Webhooks: jede Event-ID wird genau einmal verarbeitet.
+model StripeEvent {
+  id          String   @id
+  type        String
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
+
+  @@map("stripe_events")
+}
