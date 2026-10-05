@@ -1,0 +1,93 @@
+@import "tailwindcss";
+
+/*
+ * DecideCommerce Design-Tokens (Dark-only, B2B-Tech-Ästhetik).
+ * Alle Komponenten referenzieren Rollen, nie Hex-Werte.
+ */
+@theme {
+  --color-background: #08090a;
+  --color-surface: #101114;
+  --color-surface-2: #16171b;
+  --color-surface-3: #1d1e23;
+  --color-border: rgb(255 255 255 / 0.08);
+  --color-border-strong: rgb(255 255 255 / 0.14);
+  --color-foreground: #f4f5f7;
+  --color-secondary: #b4b6bf;
+  --color-muted: #8a8d97;
+  --color-accent: #7c6cf0;
+  --color-accent-strong: #9a8cff;
+  --color-accent-blue: #3987e5;
+  --color-grid: #24252a;
+
+  /* Status (fest, nie für Serien verwendet) */
+  --color-good: #3fb950;
+  --color-warning: #fab219;
+  --color-serious: #ec835a;
+  --color-critical: #e5534b;
+
+  --radius-xl: 0.875rem;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: rgb(124 108 240 / 0.35);
+}
+
+@layer utilities {
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.04) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, black 30%, transparent 75%);
+  }
+
+  .text-gradient {
+    background: linear-gradient(180deg, #ffffff 20%, #a7a9b4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .text-gradient-accent {
+    background: linear-gradient(90deg, #b3a8ff 0%, #7c6cf0 45%, #3987e5 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .glow {
+    background: radial-gradient(60% 50% at 50% 0%, rgb(124 108 240 / 0.22) 0%, transparent 70%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

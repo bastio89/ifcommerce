@@ -78,6 +78,7 @@ ORDER BY u."timestamp"
 LIMIT $1
 """
 _MARK_REPORTED_SQL = "UPDATE usage_logs SET stripe_reported_at = now() WHERE id = ANY($1::uuid[])"
+_REPORTER_LOCK_ID = 0x44434D45  # "DCME" – beliebige, projektweit eindeutige Advisory-Lock-ID
 
 
 class StripeUsageReporter:
@@ -126,13 +127,17 @@ class StripeUsageReporter:
             await asyncio.sleep(self._interval)
 
     async def flush(self) -> int:
-        rows = await self._pool.fetch(_PENDING_SQL, self._batch_size)
-        if not rows:
-            return 0
-        results = await asyncio.gather(*(self._report(row) for row in rows))
-        reported = [row_id for row_id in results if row_id is not None]
-        if reported:
-            await self._pool.execute(_MARK_REPORTED_SQL, reported)
+        async with self._pool.acquire() as conn, conn.transaction():
+            # Nur ein Prozess (Worker/Replika) meldet gleichzeitig; die Sperre endet mit der Transaktion.
+            if not await conn.fetchval("SELECT pg_try_advisory_xact_lock($1)", _REPORTER_LOCK_ID):
+                return 0
+            rows = await conn.fetch(_PENDING_SQL, self._batch_size)
+            if not rows:
+                return 0
+            results = await asyncio.gather(*(self._report(row) for row in rows))
+            reported = [row_id for row_id in results if row_id is not None]
+            if reported:
+                await conn.execute(_MARK_REPORTED_SQL, reported)
         logger.info("Reported %d/%d usage events to Stripe", len(reported), len(rows))
         return len(reported)
 
