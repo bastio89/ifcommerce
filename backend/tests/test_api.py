@@ -179,3 +179,9 @@ def test_wrong_method_is_405_not_500(client: TestClient, db: Db) -> None:
     response = client.get("/api/v1/analyze-ticket", headers={"x-api-key": raw_key})
     assert response.status_code == 405
     assert response.json()["error"]["code"] == "method_not_allowed"
+
+
+def test_session_timezone_survives_pool_reset(client: TestClient, db: Db) -> None:
+    # asyncpg führt bei jeder Rückgabe RESET ALL aus; die Zeitzone muss trotzdem UTC bleiben.
+    for _ in range(3):
+        assert db.fetchval("SHOW timezone") == "UTC"

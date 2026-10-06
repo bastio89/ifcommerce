@@ -13,17 +13,15 @@ import asyncpg
 from app.config import Settings
 
 
-async def _init_connection(conn: asyncpg.Connection) -> None:
-    # Alle Zeitstempel sind timestamptz; UTC als Sitzungszeitzone hält
-    # Monatsgrenzen (Free-Tier-Kontingent) eindeutig.
-    await conn.execute("SET TIME ZONE 'UTC'")
-
-
 async def create_pool(settings: Settings) -> asyncpg.Pool:
+    dsn, options = settings.asyncpg_connect_options()
     return await asyncpg.create_pool(
-        dsn=settings.asyncpg_dsn,
+        dsn=dsn,
         min_size=settings.db_pool_min_size,
         max_size=settings.db_pool_max_size,
-        init=_init_connection,
+        # Als Startparameter statt "SET TIME ZONE": übersteht das RESET ALL des Pools
+        # bei jeder Rückgabe und wird auch von PgBouncer/Neon-Poolern akzeptiert.
+        server_settings={"timezone": "UTC", "application_name": "decidecommerce-backend"},
         command_timeout=10,
+        **options,
     )

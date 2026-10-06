@@ -14,7 +14,7 @@
 #   local-ai  lokales Decision-Modell (Ollama + Tev1), kein KI-Anbieter/API-Key nötig
 #             -> zusätzlich DECISION_ENGINE=systemone setzen
 #   https     Caddy als Reverse Proxy mit automatischen Let's-Encrypt-Zertifikaten
-# GPU-Server: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+# GPU-Server: docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile local-ai up -d
 # =============================================================================
 name: decidecommerce
 
@@ -61,7 +61,8 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      DATABASE_URL: *database-url
+      # Externe Datenbank (z. B. Neon bei Frontend auf Vercel): BACKEND_DATABASE_URL setzen.
+      DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql://${POSTGRES_USER:-decide}:${POSTGRES_PASSWORD:-decide_local_only}@postgres:5432/${POSTGRES_DB:-decidecommerce}}
       DECISION_ENGINE: ${DECISION_ENGINE:-auto}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-opus-5-5}
@@ -77,8 +78,11 @@ services:
       SYSTEMONE_BASE_URL: ${SYSTEMONE_BASE_URL:-http://ollama:11434}
       SYSTEMONE_MODEL: ${SYSTEMONE_MODEL:-tev1:0.8b}
       SYSTEMONE_API_KEY: ${SYSTEMONE_API_KEY:-}
-      SYSTEMONE_KEEP_ALIVE: ${SYSTEMONE_KEEP_ALIVE-30m}
+      # Leer = Ollamas OLLAMA_KEEP_ALIVE=-1 gilt (Modell bleibt dauerhaft geladen).
+      SYSTEMONE_KEEP_ALIVE: ${SYSTEMONE_KEEP_ALIVE-}
       SYSTEMONE_TIMEOUT_SECONDS: ${SYSTEMONE_TIMEOUT_SECONDS:-30}
+      SYSTEMONE_WARMUP_TIMEOUT_SECONDS: ${SYSTEMONE_WARMUP_TIMEOUT_SECONDS:-300}
+      SYSTEMONE_MAX_STATE_CHARS: ${SYSTEMONE_MAX_STATE_CHARS:-3000}
       SYSTEMONE_CANCELLATION_THRESHOLD: ${SYSTEMONE_CANCELLATION_THRESHOLD:-0.9}
     ports:
       # Hinter Caddy (Profil https): BACKEND_BIND=127.0.0.1 setzen.
@@ -166,7 +170,6 @@ services:
     environment:
       APP_DOMAIN: ${APP_DOMAIN:-app.localhost}
       API_DOMAIN: ${API_DOMAIN:-api.localhost}
-      ACME_EMAIL: ${ACME_EMAIL:-}
     ports:
       - "80:80"
       - "443:443"

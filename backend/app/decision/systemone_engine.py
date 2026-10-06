@@ -106,13 +106,38 @@ class _SystemOneResponse(BaseModel):
     answers: _Answers
 
 
+_SUBJECT_MAX_CHARS = 300
+
+
+class _ContextOverflowError(DecisionEngineError):
+    """Der Prompt passt nicht in den Kontext des Modells (Ollama kürzt nie selbst)."""
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    return (cut.rsplit(" ", 1)[0] if " " in cut[-40:] else cut) + " …"
+
+
 def build_state(text: str, subject: str | None, max_chars: int) -> str:
-    """Kompakter Klartext-State (ein JSON-Objekt würde doppelt escaped und Tokens kosten)."""
-    body = text.strip()
-    if len(body) > max_chars:
-        cut = body[:max_chars]
-        body = (cut.rsplit(" ", 1)[0] if " " in cut[-40:] else cut) + " …"
-    return f"Subject: {subject.strip()}\n\nMessage:\n{body}" if subject else f"Message:\n{body}"
+    """Kompakter Klartext-State (ein JSON-Objekt würde doppelt escaped und Tokens kosten).
+
+    Betreff und Nachricht teilen sich das Budget ``max_chars``.
+    """
+    if not subject or not subject.strip():
+        return f"Message:\n{_truncate(text, max_chars)}"
+    head = f"Subject: {_truncate(subject, _SUBJECT_MAX_CHARS)}\n\nMessage:\n"
+    return head + _truncate(text, max(200, max_chars - len(head)))
+
+
+def _keep_alive_value(raw: str) -> str | int:
+    """Ollama erwartet Dauern mit Einheit ("30m") oder Sekunden als Zahl (-1 = dauerhaft)."""
+    try:
+        return int(raw)
+    except ValueError:
+        return raw
 
 
 def _urgency_level(answer: _ScoreAnswer, levels: int) -> int:
@@ -146,7 +171,7 @@ class SystemOneDecisionEngine:
         self._model = settings.systemone_model
         self.name = f"systemone:{self._model}"
         self._url = settings.systemone_base_url.rstrip("/") + "/v1/systemone"
-        self._keep_alive = settings.systemone_keep_alive or None
+        self._keep_alive = _keep_alive_value(settings.systemone_keep_alive) if settings.systemone_keep_alive else None
         self._max_state_chars = settings.systemone_max_state_chars
         self._cancel_threshold = settings.systemone_cancellation_threshold
         self._warmup_timeout = settings.systemone_warmup_timeout_seconds
@@ -169,13 +194,15 @@ class SystemOneDecisionEngine:
             response = await self._client.post(self._url, json=self._payload(state), headers=self._headers, **extra)
         except httpx2.TimeoutException as exc:
             raise DecisionEngineError("Decision-Modell: Timeout") from exc
-        except httpx2.HTTPError as exc:
-            raise DecisionEngineError(f"Decision-Modell nicht erreichbar ({type(exc).__name__})") from exc
+        except Exception as exc:  # Verbindungsfehler, ungültige URL, Protokollfehler …
+            raise DecisionEngineError(f"Decision-Modell nicht erreichbar ({type(exc).__name__}: {exc})") from exc
 
         if response.status_code != 200:
             message = _error_message(response)
             if response.status_code == 404:
                 message += f" – Modell mit `ollama pull {self._model}` laden"
+            if response.status_code == 400 and "tokens" in message and ("expected" in message or "context" in message):
+                raise _ContextOverflowError(f"Text zu lang für den Modellkontext: {message}")
             raise DecisionEngineError(f"Decision-Modell-Fehler {response.status_code}: {message}")
         try:
             return response.json()
@@ -183,8 +210,11 @@ class SystemOneDecisionEngine:
             raise DecisionEngineError("Decision-Modell lieferte kein JSON") from exc
 
     async def decide(self, text: str, hints: DecisionHints) -> TicketDecision:
-        state = build_state(text, hints.subject, self._max_state_chars)
-        raw = await self._post(state)
+        try:
+            raw = await self._post(build_state(text, hints.subject, self._max_state_chars))
+        except _ContextOverflowError:
+            # URLs, Artikelnummern oder Emojis kosten mehr Tokens pro Zeichen: einmal kürzer versuchen.
+            raw = await self._post(build_state(text, hints.subject, self._max_state_chars // 2))
         try:
             answers = _SystemOneResponse.model_validate(raw).answers
             category = TicketCategory(answers.category.choice)
@@ -205,7 +235,7 @@ class SystemOneDecisionEngine:
         try:
             await self._post("Message:\nHello, where is my parcel?", request_timeout=self._warmup_timeout)
             logger.info("Decision model %s is loaded and ready", self._model)
-        except DecisionEngineError as exc:
+        except Exception as exc:  # Vorwärmen darf den Start nie stören
             logger.warning("Decision model warm-up failed: %s", exc)
 
     async def aclose(self) -> None:

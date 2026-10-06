@@ -97,14 +97,41 @@ _NEGATED_CANCELLATION = re.compile(
     re.IGNORECASE,
 )
 
-_URGENCY_SIGNALS = _signals(
-    # Rechtliche Drohungen / Eskalation -> sofort Stufe 5
-    (r"\banwalt|\brechtsanwalt|\banw(?:ä|ae)ltin|\bklage\b|\bverklagen|\bvor\s+gericht|\bgerichtlich|\babmahnung", 5.0),
-    (
-        r"\bverbraucherzentrale|\bpolizei|\banzeige\s+(?:erstatten|wegen)|\bstrafanzeige|\bbetr(?:ü|ue)ger|\bist\s+(?:doch\s+|das\s+)?betrug\b",
-        5.0,
+# Rechtliche Drohungen -> immer Stufe 5, für JEDE Engine (siehe pipeline.py).
+# Nur echte Drohformulierungen, keine bloßen Wörter: "Nike Court Vision", "Polizei-Kostüm",
+# das Buch "Der Anwalt" oder "ist diese SMS ein Scam?" sind keine Eskalation.
+_LEGAL_THREAT = re.compile(
+    "|".join(
+        [
+            # Deutsch
+            r"\b(?:mein(?:en|em)?|einen|unser(?:en|em)?)\s+(?:rechts)?anw(?:a|ä|ae)lt(?:in)?\b",
+            r"\b(?:rechts)?anw(?:a|ä|ae)lt(?:in)?\s+(?:einschalten|beauftragen|nehmen|informieren|kontaktieren"
+            r"|eingeschaltet|beauftragt)",
+            r"\brechtliche\s+schritte|\bjuristische\s+schritte|\bverklagen|\bklage\s+(?:einreichen|erheben)"
+            r"|\bvor\s+gericht\b|\bgerichtlich|\babmahnung|\bmahnverfahren",
+            r"\bverbraucherzentrale|\bverbraucherschutz|\bstrafanzeige|\banzeige\s+(?:erstatten|wegen|bei)"
+            r"|\bpolizei\s+(?:einschalten|rufen|informieren|verst(?:ä|ae)ndigen)|\bzur\s+polizei\b",
+            r"\bbetr(?:ü|ue)ger|\b(?:ist|das\s+ist|reiner|glatter)\s+(?:doch\s+|das\s+)?betrug\b",
+            # Englisch
+            r"\b(?:my|a|our)\s+(?:lawyer|attorney|solicitor)\b|\blawsuit\b|\blegal\s+action\b|\bsmall\s+claims\b",
+            r"\b(?:take|taking)\s+(?:you|this|it|the\s+matter)\s+to\s+court\b"
+            r"|\b(?:i\s+will|i'll|i\s+am\s+going\s+to|i'm\s+going\s+to|gonna)\s+sue\b|\bsuing\s+you\b",
+            r"\b(?:report|reporting)\s+(?:you|this|your\s+(?:shop|store|company))\s+(?:to|for)\b"
+            r"|\b(?:call|calling|contact|contacting)\s+the\s+police\b",
+            r"\byou(?:'re|\s+are)\s+(?:a\s+)?(?:scam|fraud|scammers|frauds|thieves)\b"
+            r"|\bthis\s+is\s+(?:a\s+|pure\s+)?(?:scam|fraud|theft)\b",
+        ]
     ),
-    (r"\blawyer|\battorney|\blawsuit|\bsue\b|\bsuing\b|\blegal\s+action|\bcourt\b|\bfraud\b|\bscam\b", 5.0),
+    re.IGNORECASE,
+)
+
+
+def detect_legal_threat(text: str) -> bool:
+    """Hochpräzises Signal für Anwalts-, Klage-, Polizei- oder Betrugsdrohungen (DE/EN)."""
+    return _LEGAL_THREAT.search(text) is not None
+
+
+_URGENCY_SIGNALS = _signals(
     (r"\bchargeback|\bdispute\s+(?:the\s+)?(?:charge|payment)|\br(?:ü|ue)ckbuchung|\bbank\s+zur(?:ü|ue)ckbuchen", 4.0),
     (r"\btrustpilot|\bschlechte\s+bewertung|\bbad\s+review|\bsocial\s+media", 3.0),
     # Ärger / Frustration
@@ -125,14 +152,6 @@ _URGENCY_SIGNALS = _signals(
         1.0,
     ),
 )
-
-
-_LEGAL_THREAT_SIGNALS = tuple(s for s in _URGENCY_SIGNALS if s.weight >= 5.0)
-
-
-def detect_legal_threat(text: str) -> bool:
-    """Hochpräzises Signal für Anwalts-, Klage-, Polizei- oder Betrugsdrohungen (DE/EN)."""
-    return any(signal.pattern.search(text) for signal in _LEGAL_THREAT_SIGNALS)
 
 
 class HeuristicDecisionEngine:
@@ -182,9 +201,9 @@ class HeuristicDecisionEngine:
             TicketCategory.PRODUCT_ISSUE: 2.5,
         }[category]
 
-        hits = [s.weight for s in _URGENCY_SIGNALS if s.pattern.search(text)]
-        if any(weight >= 5.0 for weight in hits):
+        if detect_legal_threat(text):
             return 5
+        hits = [s.weight for s in _URGENCY_SIGNALS if s.pattern.search(text)]
 
         score = base + 0.6 * sum(hits)
         exclamations = text.count("!")

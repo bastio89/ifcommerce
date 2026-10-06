@@ -16,7 +16,7 @@ _PRO_LOCKED = {SubscriptionStatus.UNPAID, SubscriptionStatus.PAUSED}
 _MONTHLY_USAGE_SQL = """
 SELECT count(*) FROM usage_logs
 WHERE tenant_id = $1::uuid
-  AND "timestamp" >= date_trunc('month', now())
+  AND "timestamp" >= date_trunc('month', now(), 'UTC')
 """
 
 

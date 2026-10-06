@@ -94,7 +94,7 @@ flowchart LR
 │   │   ├── decision/             # systemone_engine · anthropic_engine · heuristic_engine · pipeline
 │   │   ├── services/             # tenants · entitlements · usage · stripe_sync · rate_limit
 │   │   └── routers/              # analyze · webhooks · demo · health
-│   └── tests/                    # 63 Tests (Unit + Integration gegen PostgreSQL)
+│   └── tests/                    # 91 Tests (Unit + Integration gegen PostgreSQL)
 ├── frontend/                     # Next.js 16 (App Router), Tailwind CSS 4, TypeScript
 │   ├── Dockerfile                # deps → builder → migrator / runner (standalone)
 │   ├── prisma.config.ts          # zeigt auf ../prisma
@@ -155,6 +155,7 @@ Alle Variablen sind in [`.env.example`](.env.example) dokumentiert. Die wichtigs
 | Variable | Dienst | Bedeutung |
 |---|---|---|
 | `DATABASE_URL` | beide | PostgreSQL-Verbindung (in Compose automatisch gesetzt) |
+| `BACKEND_DATABASE_URL` | compose | Externe DB nur fürs Backend (z. B. Neon, wenn das Frontend auf Vercel läuft) |
 | `DECISION_ENGINE` | backend | `auto` · `anthropic` · `heuristic` |
 | `ANTHROPIC_API_KEY` | backend | Claude-API-Key; ohne Key nutzt `auto` die Heuristik |
 | `ANTHROPIC_MODEL` | backend | Standard `claude-opus-5-5`, frei wählbar |
@@ -246,6 +247,7 @@ DECISION_ENGINE=systemone SYSTEMONE_MODEL=tev1:4b python -m evals.run_eval --eng
 - **Wahrscheinlichkeiten sind nicht kalibriert.** Schwellen (z. B. `SYSTEMONE_CANCELLATION_THRESHOLD`) an eigenen Tickets einstellen.
 - **Widget:** Auf CPU-Servern im Script-Tag `data-timeout="8000"` setzen (Standard 3.000 ms).
 - **Sicherheit:** Ollama hat keine Authentifizierung. In Compose ist Port 11434 nur im internen Netz erreichbar – nie veröffentlichen.
+- **Kaltstart:** In Compose bleibt das Modell dauerhaft geladen (`OLLAMA_KEEP_ALIVE=-1`); das Backend wärmt es beim Start vor. Ein gesetztes `SYSTEMONE_KEEP_ALIVE` (z. B. `30m`, ohne Docker der Standard) überstimmt das pro Anfrage.
 
 ### Gehostetes TypeSafe Jev
 
@@ -266,22 +268,22 @@ COMPOSE_PROFILES=local-ai,https
 DECISION_ENGINE=systemone
 APP_DOMAIN=app.deine-domain.de
 API_DOMAIN=api.deine-domain.de
-ACME_EMAIL=admin@deine-domain.de
 APP_URL=https://app.deine-domain.de
 PUBLIC_API_BASE_URL=https://api.deine-domain.de
 BACKEND_BIND=127.0.0.1
 FRONTEND_BIND=127.0.0.1
-POSTGRES_PASSWORD=…  INTERNAL_API_SECRET=…
+POSTGRES_PASSWORD=…            # openssl rand -hex 24
+INTERNAL_API_SECRET=…          # openssl rand -hex 32
 
 docker compose up -d --build
 ```
 
-Caddy (`deploy/Caddyfile`) holt die TLS-Zertifikate automatisch. Ollama, Postgres und das Backend sind nur intern bzw. über Caddy erreichbar; die Ticket-Texte bleiben auf diesem Server.
+Caddy (`deploy/Caddyfile`) holt die TLS-Zertifikate automatisch; die Ports 80 und 443 müssen offen sein. Ollama, Postgres und das Backend sind nur intern bzw. über Caddy erreichbar; die Ticket-Texte bleiben auf diesem Server.
 
 ### Option B: Frontend auf Vercel, Backend + Modell auf dem Server
 
 1. **Server** wie in Option A, aber ohne Frontend-Domain; das Backend ist unter `https://api.deine-domain.de` erreichbar.
-2. **Datenbank:** Das Frontend auf Vercel braucht eine öffentlich erreichbare Postgres-Datenbank – am einfachsten Neon (Vercel Marketplace, Region Frankfurt) für Frontend **und** Backend. Neon liefert `DATABASE_URL` (gepoolt, Laufzeit) und `DATABASE_URL_UNPOOLED` (direkt, Migrationen); `prisma.config.ts` nutzt automatisch die direkte URL. Im Backend auf dem Server `DATABASE_URL` auf die Neon-URL setzen.
+2. **Datenbank:** Das Frontend auf Vercel braucht eine öffentlich erreichbare Postgres-Datenbank – am einfachsten Neon (Vercel Marketplace, Region Frankfurt) für Frontend **und** Backend. Neon liefert `DATABASE_URL` (gepoolt, Laufzeit) und `DATABASE_URL_UNPOOLED` (direkt, Migrationen); `prisma.config.ts` nutzt automatisch die direkte URL. Auf dem Server in `.env` **`BACKEND_DATABASE_URL`** auf die direkte Neon-URL setzen (dauerhafter Server mit kleinem Pool, daher ohne Pooler) und `sslmode=require` durch `sslmode=verify-full` ersetzen, damit das Zertifikat geprüft wird; `channel_binding` entfernt das Backend selbst. Die lokalen Container `postgres`, `migrate` und `frontend` starten dann zwar mit, werden aber nicht genutzt – die Migrationen übernimmt das Vercel-Deployment.
 3. **Vercel-Projekt** aus diesem Repo importieren: Root Directory `frontend`, Framework Next.js. Die Option „Include source files outside of the Root Directory in the Build Step“ muss aktiv sein (Standard), weil das Prisma-Schema in `../prisma` liegt. `frontend/vercel.json` setzt die Region `fra1` (Frankfurt).
 4. **Umgebungsvariablen** im Vercel-Projekt: `DATABASE_URL`, `DATABASE_URL_UNPOOLED` (Neon), `APP_URL=https://<vercel-domain>`, `PUBLIC_API_BASE_URL` und `BACKEND_INTERNAL_URL=https://api.deine-domain.de`, `INTERNAL_API_SECRET` (gleicher Wert wie im Backend), Stripe-Variablen.
 5. **Migrationen:** Das Skript `vercel-build` führt `prisma migrate deploy` nur bei Production-Deployments aus (`scripts/vercel-migrate.mjs`), damit Preview-Deployments nie die Produktions-DB migrieren. Mit Neon-Preview-Branching kann `MIGRATE_PREVIEW=1` gesetzt werden; `MIGRATE_ON_BUILD=0` schaltet es ab (z. B. wenn ein CI-Job migriert).
@@ -334,7 +336,7 @@ Usage-Based Billing: Jede Pro-Analyse wird als Meter-Event mit `identifier = usa
 ## Tests & Qualität
 
 ```bash
-# Backend: 63 Tests, Integrationstests gegen echtes PostgreSQL (Schema aus den Prisma-Migrationen)
+# Backend: 91 Tests, Integrationstests gegen echtes PostgreSQL (Schema aus den Prisma-Migrationen)
 cd backend && TEST_DATABASE_URL=postgresql://decide:decide@localhost:5432/decidecommerce_test pytest
 ruff check . && ruff format --check .
 

@@ -62,6 +62,11 @@ class DecisionPipeline:
             logger.warning("Primary decision engine failed, using heuristic fallback: %s", exc)
             decision = await self._fallback.decide(body.text, hints)
             engine_name, degraded = self._fallback.name, True
+        except Exception:
+            # Unerwarteter Fehler einer Engine darf nie zu HTTP 500 führen – aber laut loggen.
+            logger.exception("Unexpected error in decision engine %s, using heuristic fallback", self._primary.name)
+            decision = await self._fallback.decide(body.text, hints)
+            engine_name, degraded = self._fallback.name, True
 
         # 3) Leitplanken: deterministisch erkannte Fakten überstimmen das Modell.
         #    - Eine erkannte Bestellnummer ist ein harter Fakt.

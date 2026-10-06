@@ -135,7 +135,7 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
         finally:
             if warm_up_task is not None:
                 warm_up_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await warm_up_task
             if container.usage_reporter is not None:
                 await container.usage_reporter.stop()

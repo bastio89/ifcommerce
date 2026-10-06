@@ -1,7 +1,7 @@
 import pytest
 
 from app.decision.base import DecisionHints
-from app.decision.heuristic_engine import HeuristicDecisionEngine
+from app.decision.heuristic_engine import HeuristicDecisionEngine, detect_legal_threat
 from app.schemas import TicketCategory
 
 engine = HeuristicDecisionEngine()
@@ -63,3 +63,40 @@ def test_confidence_is_bounded() -> None:
     for text in ["", "?", "Wo ist mein Paket? Tracking? DHL? Lieferstatus? Noch nicht angekommen!"]:
         decision = engine.decide_sync(text, DecisionHints())
         assert 0.0 <= decision.confidence <= 0.95
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Wenn das Paket nicht bis Freitag da ist, schalte ich meinen Anwalt ein.",
+        "Sonst gehe ich zur Verbraucherzentrale.",
+        "Ich werde rechtliche Schritte einleiten.",
+        "Das ist doch Betrug!",
+        "Ich werde euch verklagen.",
+        "If this isn't fixed by tomorrow I'll file a chargeback and report you for fraud.",
+        "I will sue you.",
+        "My lawyer will contact you.",
+        "This is a scam!",
+    ],
+)
+def test_legal_threats_are_detected(text: str) -> None:
+    assert detect_legal_threat(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Aus dem Review: harmlose Tickets, die früher fälschlich als Stufe 5 galten.
+        "Hi, are the Nike Court Vision sneakers available in size 42?",
+        "Do you have tennis court shoes in black?",
+        "Hello, I'm Sue and my order hasn't arrived.",
+        "I got an SMS saying my parcel is held, is this a scam or from you?",
+        "PayPal flagged my payment as fraud, can you resend the invoice?",
+        "Is the Polizei-Kostüm for Fasching still available in size M?",
+        "Gibt es das Buch 'Der Anwalt' von John Grisham noch?",
+        "Mein Mann ist Anwalt und hat das Paket angenommen.",
+    ],
+)
+def test_ordinary_words_are_not_legal_threats(text: str) -> None:
+    assert not detect_legal_threat(text)
+    assert engine.decide_sync(text, DecisionHints()).urgency < 5

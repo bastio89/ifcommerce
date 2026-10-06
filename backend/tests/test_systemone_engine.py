@@ -109,11 +109,64 @@ def test_state_is_truncated_for_small_context() -> None:
     assert state.endswith(" …")
 
 
+def test_subject_counts_towards_the_budget() -> None:
+    state = build_state("Wort " * 2000, "WG: AW: " * 100, max_chars=3000)
+    assert len(state) <= 3010
+    assert state.startswith("Subject: WG: AW:")
+    assert len(state.split("\n\nMessage:\n")[0]) <= 320  # Betreff gedeckelt
+
+
+async def test_context_overflow_is_retried_with_shorter_state() -> None:
+    states: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        states.append(json.loads(request.content)["state"])
+        if len(states) == 1:
+            overflow = "prompt 0 has 2083 tokens; expected 1–2050 (input is never truncated)"
+            return httpx2.Response(400, json={"error": overflow})
+        return httpx2.Response(200, json=OLLAMA_RESPONSE)
+
+    decision = await _engine(handler).decide("https://shop.example/p/SKU-12345 " * 200, DecisionHints())
+    assert decision.category is TicketCategory.RETURN_OR_REFUND
+    assert len(states) == 2
+    assert len(states[1]) < len(states[0])
+
+
+def test_numeric_keep_alive_is_sent_as_number() -> None:
+    engine = SystemOneDecisionEngine(Settings(systemone_keep_alive="-1"), client=httpx2.AsyncClient())
+    assert engine._payload("x")["keep_alive"] == -1
+    engine = SystemOneDecisionEngine(Settings(systemone_keep_alive=""), client=httpx2.AsyncClient())
+    assert "keep_alive" not in engine._payload("x")
+
+
+async def test_invalid_url_becomes_engine_error() -> None:
+    engine = SystemOneDecisionEngine(Settings(systemone_base_url="http://ollama:port"))
+    try:
+        with pytest.raises(DecisionEngineError, match="nicht erreichbar"):
+            await engine.decide("Hallo", DecisionHints())
+        await engine.warm_up()  # darf nie werfen
+    finally:
+        await engine.aclose()
+
+
+async def test_unexpected_engine_exceptions_fall_back() -> None:
+    class Broken:
+        name = "broken"
+
+        async def decide(self, text: str, hints: DecisionHints) -> Any:
+            raise RuntimeError("bug")
+
+    result = await DecisionPipeline(primary=Broken()).analyze("Wo ist mein Paket?")  # type: ignore[arg-type]
+    assert result.degraded is True
+    assert result.engine == "heuristic-v1"
+
+
 @pytest.mark.parametrize(
     ("status", "body", "expected"),
     [
         (404, {"error": "model 'tev1' not found"}, "ollama pull tev1"),
-        (400, {"error": "prompt 0 has 2300 tokens; expected 1–2048 (input is never truncated)"}, "400"),
+        (400, {"error": "prompt 0 has 2300 tokens; expected 1–2048 (input is never truncated)"}, "Modellkontext"),
+        (400, {"error": "llama3.2:latest does not support decision"}, "400"),
         (500, {"error": "model failed to load"}, "500"),
         (422, {"detail": [{"msg": "field required"}]}, "422"),
     ],
@@ -154,7 +207,7 @@ async def test_legal_threat_guardrail_overrides_low_model_urgency() -> None:
     pipeline = DecisionPipeline(primary=_engine(lambda _: httpx2.Response(200, json=low)))
 
     result = await pipeline.analyze("Ich warte seit Wochen. Jetzt schalte ich meinen Anwalt ein!")
-    assert result.engine == "systemone:tev1"
+    assert result.engine == "systemone:tev1:0.8b"
     assert result.decision.urgency == 5
 
     calm = await pipeline.analyze("Wann kommt mein Paket?")

@@ -2,22 +2,27 @@
 
 from __future__ import annotations
 
+import ssl
 from functools import lru_cache
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
-# Query-Parameter, die nur Prisma versteht. asyncpg würde sie als
-# Postgres-Laufzeitparameter senden und mit einem Fehler abbrechen.
-_PRISMA_ONLY_DSN_PARAMS = {
+# Query-Parameter, die nur Prisma bzw. libpq verstehen. asyncpg würde sie als
+# Postgres-Laufzeitparameter senden und mit einem Fehler abbrechen (z. B. Neons
+# Standard-URL mit channel_binding=require: "unsupported startup parameter").
+_NON_ASYNCPG_DSN_PARAMS = {
     "schema",
     "connection_limit",
     "pool_timeout",
     "pgbouncer",
     "socket_timeout",
     "statement_cache_size",
+    "channel_binding",
+    "uselibpqcompat",
+    "connect_timeout",
 }
 
 
@@ -31,6 +36,8 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://decide:decide@localhost:5432/decidecommerce"
     db_pool_min_size: int = 2
     db_pool_max_size: int = 20
+    # None = automatisch: 0 hinter PgBouncer/Neon-Pooler (Host enthält "-pooler"), sonst asyncpg-Default.
+    db_statement_cache_size: int | None = None
 
     # --- KI-Decision-Engine ---
     # auto      -> Anthropic, falls ein API-Key gesetzt ist, sonst Heuristik
@@ -44,10 +51,11 @@ class Settings(BaseSettings):
     # TypeSafe Jev: https://api.typesafe.ai + SYSTEMONE_API_KEY, Modell "jev-latest".
     systemone_base_url: str = "http://localhost:11434"
     systemone_api_key: SecretStr | None = None
-    systemone_model: str = "tev1"
+    systemone_model: str = "tev1:0.8b"
     # Großzügig: Ollama lädt das Modell beim ersten Aufruf (CPU: bis zu ~1 min).
     systemone_timeout_seconds: float = 30.0
-    # Ollama hält das Modell so lange im RAM; leer lassen für TypeSafe.
+    # Ollama hält das Modell so lange im RAM ("30m", oder -1 = dauerhaft). Leer = Server-Einstellung
+    # (OLLAMA_KEEP_ALIVE) gilt; leer lassen für TypeSafe.
     systemone_keep_alive: str = "30m"
     # Tev1 hat ~2.048 Tokens Kontext pro Frage und kürzt nie selbst.
     systemone_max_state_chars: int = 3000
@@ -85,6 +93,14 @@ class Settings(BaseSettings):
     rate_limit_secret_key_per_minute: int = 600
     rate_limit_publishable_key_per_minute: int = 60
 
+    @field_validator("systemone_base_url")
+    @classmethod
+    def _check_base_url(cls, value: str) -> str:
+        value = value.strip()  # z. B. Zeilenumbruch aus Secret-Dateien
+        if not value.startswith(("http://", "https://")):
+            raise ValueError("SYSTEMONE_BASE_URL muss mit http:// oder https:// beginnen")
+        return value.rstrip("/")
+
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
@@ -92,13 +108,32 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
+    def asyncpg_connect_options(self) -> tuple[str, dict[str, Any]]:
+        """DATABASE_URL -> (asyncpg-kompatible DSN, zusätzliche create_pool-Argumente)."""
+        parts = urlsplit(self.database_url)
+        params = parse_qsl(parts.query)
+        has_root_cert = any(key == "sslrootcert" for key, _ in params)
+        options: dict[str, Any] = {}
+        kept: list[tuple[str, str]] = []
+        for key, value in params:
+            if key == "connect_timeout":
+                options["timeout"] = float(value)
+            elif key == "sslmode" and value == "verify-full" and not has_root_cert:
+                # libpq-Semantik ohne Root-Zertifikatsdatei: System-CAs nutzen, Host prüfen.
+                options["ssl"] = ssl.create_default_context()
+            elif key not in _NON_ASYNCPG_DSN_PARAMS:
+                kept.append((key, value))
+        cache_size = self.db_statement_cache_size
+        if cache_size is None and "-pooler" in (parts.hostname or ""):
+            cache_size = 0  # PgBouncer im Transaktionsmodus: keine benannten Statements cachen
+        if cache_size is not None:
+            options["statement_cache_size"] = cache_size
+        scheme = "postgresql" if parts.scheme in {"postgres", "postgresql"} else parts.scheme
+        return urlunsplit((scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment)), options
+
     @property
     def asyncpg_dsn(self) -> str:
-        """DATABASE_URL ohne Prisma-spezifische Parameter (asyncpg-kompatibel)."""
-        parts = urlsplit(self.database_url)
-        query = [(k, v) for k, v in parse_qsl(parts.query) if k not in _PRISMA_ONLY_DSN_PARAMS]
-        scheme = "postgresql" if parts.scheme in {"postgres", "postgresql"} else parts.scheme
-        return urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+        return self.asyncpg_connect_options()[0]
 
     @property
     def anthropic_enabled(self) -> bool:
