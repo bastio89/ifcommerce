@@ -9,6 +9,12 @@
 #
 # Alle Werte haben lokale Defaults. Für Staging/Produktion .env.example nach .env
 # kopieren und mindestens Passwörter, Secrets und öffentliche URLs setzen.
+#
+# Optionale Profile (COMPOSE_PROFILES in .env oder --profile):
+#   local-ai  lokales Decision-Modell (Ollama + Tev1), kein KI-Anbieter/API-Key nötig
+#             -> zusätzlich DECISION_ENGINE=systemone setzen
+#   https     Caddy als Reverse Proxy mit automatischen Let's-Encrypt-Zertifikaten
+# GPU-Server: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 # =============================================================================
 name: decidecommerce
 
@@ -67,13 +73,24 @@ services:
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:-change-me-internal-secret}
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
       WEB_CONCURRENCY: ${BACKEND_WORKERS:-2}
+      # Decision-Modell über /v1/systemone (lokales Ollama oder TypeSafe Jev)
+      SYSTEMONE_BASE_URL: ${SYSTEMONE_BASE_URL:-http://ollama:11434}
+      SYSTEMONE_MODEL: ${SYSTEMONE_MODEL:-tev1:0.8b}
+      SYSTEMONE_API_KEY: ${SYSTEMONE_API_KEY:-}
+      SYSTEMONE_KEEP_ALIVE: ${SYSTEMONE_KEEP_ALIVE-30m}
+      SYSTEMONE_TIMEOUT_SECONDS: ${SYSTEMONE_TIMEOUT_SECONDS:-30}
+      SYSTEMONE_CANCELLATION_THRESHOLD: ${SYSTEMONE_CANCELLATION_THRESHOLD:-0.9}
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      # Hinter Caddy (Profil https): BACKEND_BIND=127.0.0.1 setzen.
+      - "${BACKEND_BIND:-0.0.0.0}:${BACKEND_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      ollama-pull:
+        condition: service_completed_successfully
+        required: false # nur mit Profil local-ai
     networks: [internal]
 
   frontend:
@@ -93,10 +110,72 @@ services:
       STRIPE_PRICE_PRO_METERED: ${STRIPE_PRICE_PRO_METERED:-}
       FREE_TIER_MONTHLY_LIMIT: ${FREE_TIER_MONTHLY_LIMIT:-250}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_BIND:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       migrate:
         condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+    networks: [internal]
+
+  # --- Profil local-ai: lokales Decision-Modell -------------------------------
+  # Ollama hat KEINE Authentifizierung: niemals Port 11434 veröffentlichen.
+  ollama:
+    image: ollama/ollama:0.35.1 # /v1/systemone benötigt Ollama >= 0.35.0
+    profiles: [local-ai]
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: "-1" # Modell dauerhaft im RAM halten
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1} # CPU: 1, GPU: 2-4
+      OLLAMA_MAX_QUEUE: ${OLLAMA_MAX_QUEUE:-32} # Überlast -> 503 -> Heuristik-Fallback
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NO_CLOUD: "1"
+    volumes:
+      - ollama-models:/root/.ollama
+    expose: ["11434"]
+    healthcheck:
+      # Das Image enthält weder curl noch wget; die CLI fragt den lokalen Server ab.
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    networks: [internal]
+
+  # Einmaliger Job: lädt das Modell nur, wenn es noch fehlt. So startet der Stack auch,
+  # wenn die Ollama-Registry beim Neustart nicht erreichbar ist.
+  ollama-pull:
+    image: ollama/ollama:0.35.1
+    profiles: [local-ai]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      MODEL: ${SYSTEMONE_MODEL:-tev1:0.8b}
+    entrypoint: ["/bin/sh", "-c"]
+    command: ['ollama show "$$MODEL" > /dev/null 2>&1 || ollama pull "$$MODEL"']
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+    networks: [internal]
+
+  # --- Profil https: TLS-Terminierung für den Betrieb auf einem Server -------
+  caddy:
+    image: caddy:2-alpine
+    profiles: [https]
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-app.localhost}
+      API_DOMAIN: ${API_DOMAIN:-api.localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
       backend:
         condition: service_healthy
     networks: [internal]
@@ -106,3 +185,6 @@ networks:
 
 volumes:
   postgres-data:
+  ollama-models:
+  caddy-data:
+  caddy-config:

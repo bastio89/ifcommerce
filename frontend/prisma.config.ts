@@ -9,7 +9,13 @@ export default defineConfig({
     path: "../prisma/migrations",
   },
   datasource: {
+    // Die CLI (Migrationen) braucht eine DIREKTE Verbindung – nie einen PgBouncer-Pooler.
+    // Neon/Vercel liefern sie als DATABASE_URL_UNPOOLED; lokal/Docker reicht DATABASE_URL.
     // Für `prisma generate` wird keine echte Verbindung benötigt.
-    url: process.env.DATABASE_URL ?? "postgresql://placeholder:placeholder@localhost:5432/placeholder",
+    url:
+      process.env.DATABASE_URL_UNPOOLED ??
+      process.env.DIRECT_URL ??
+      process.env.DATABASE_URL ??
+      "postgresql://placeholder:placeholder@localhost:5432/placeholder",
   },
 });

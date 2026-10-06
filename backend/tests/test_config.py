@@ -20,7 +20,8 @@ def test_prisma_only_dsn_params_are_stripped() -> None:
     assert settings.asyncpg_dsn == "postgresql://u:p@db:5432/app?sslmode=require"
 
 
-def test_llm_disabled_without_key_or_in_heuristic_mode() -> None:
-    assert not Settings(anthropic_api_key=None).llm_enabled
-    assert not Settings(anthropic_api_key="sk-ant-x", decision_engine="heuristic").llm_enabled
-    assert Settings(anthropic_api_key="sk-ant-x", decision_engine="auto").llm_enabled
+def test_anthropic_only_with_key_and_matching_mode() -> None:
+    assert not Settings(anthropic_api_key=None).anthropic_enabled
+    assert not Settings(anthropic_api_key="sk-ant-x", decision_engine="heuristic").anthropic_enabled
+    assert not Settings(anthropic_api_key="sk-ant-x", decision_engine="systemone").anthropic_enabled
+    assert Settings(anthropic_api_key="sk-ant-x", decision_engine="auto").anthropic_enabled

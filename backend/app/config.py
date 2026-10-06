@@ -34,9 +34,29 @@ class Settings(BaseSettings):
 
     # --- KI-Decision-Engine ---
     # auto      -> Anthropic, falls ein API-Key gesetzt ist, sonst Heuristik
-    # anthropic -> immer das LLM (Heuristik nur als Fallback bei Fehlern)
+    # systemone -> Decision-Modell über /v1/systemone: lokal mit Ollama (Tev1) oder TypeSafe Jev
+    # anthropic -> immer Claude (Heuristik nur als Fallback bei Fehlern)
     # heuristic -> deterministische, lokale Regel-Engine (kein externer Call)
-    decision_engine: Literal["auto", "anthropic", "heuristic"] = "auto"
+    decision_engine: Literal["auto", "systemone", "anthropic", "heuristic"] = "auto"
+
+    # "System One"-Decision-Modelle (kein Text, nur Wahrscheinlichkeiten).
+    # Ollama: http://localhost:11434 (Docker: http://ollama:11434), kein Key nötig.
+    # TypeSafe Jev: https://api.typesafe.ai + SYSTEMONE_API_KEY, Modell "jev-latest".
+    systemone_base_url: str = "http://localhost:11434"
+    systemone_api_key: SecretStr | None = None
+    systemone_model: str = "tev1"
+    # Großzügig: Ollama lädt das Modell beim ersten Aufruf (CPU: bis zu ~1 min).
+    systemone_timeout_seconds: float = 30.0
+    # Ollama hält das Modell so lange im RAM; leer lassen für TypeSafe.
+    systemone_keep_alive: str = "30m"
+    # Tev1 hat ~2.048 Tokens Kontext pro Frage und kürzt nie selbst.
+    systemone_max_state_chars: int = 3000
+    # Kalibriert auf evals/tickets.jsonl: Tev1 vergibt Retouren/Umtausch oft 0.5-0.8,
+    # echten Stornos >= 0.96. Mit eigenen Tickets per evals/run_eval.py nachjustieren.
+    systemone_cancellation_threshold: float = Field(default=0.9, ge=0.0, le=1.0)
+    # Erster Aufruf lädt das Modell (CPU: bis zu ~1-2 min) – eigenes Timeout fürs Vorwärmen.
+    systemone_warmup_timeout_seconds: float = 300.0
+
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-opus-5-5"
     # Klassifikation braucht kaum Denkaufwand: "low" minimiert Latenz & Kosten.
@@ -81,8 +101,8 @@ class Settings(BaseSettings):
         return urlunsplit((scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
     @property
-    def llm_enabled(self) -> bool:
-        if self.decision_engine == "heuristic":
+    def anthropic_enabled(self) -> bool:
+        if self.decision_engine not in {"auto", "anthropic"}:
             return False
         return bool(self.anthropic_api_key and self.anthropic_api_key.get_secret_value())
 

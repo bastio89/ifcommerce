@@ -1,0 +1,8 @@
+# GPU-Override für das lokale Decision-Modell (NVIDIA, Container Toolkit installiert):
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml --profile local-ai up -d
+# Mit GPU lohnt sich das größere Modell: SYSTEMONE_MODEL=tev1:4b
+services:
+  ollama:
+    gpus: all
+    environment:
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}

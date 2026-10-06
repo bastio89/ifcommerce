@@ -8,7 +8,7 @@ from collections import Counter
 from dataclasses import dataclass
 
 from app.decision.base import DecisionEngine, DecisionEngineError, DecisionHints
-from app.decision.heuristic_engine import HeuristicDecisionEngine
+from app.decision.heuristic_engine import HeuristicDecisionEngine, detect_legal_threat
 from app.privacy.pii import scrub_pii
 from app.schemas import TicketDecision
 
@@ -33,6 +33,10 @@ class DecisionPipeline:
     @property
     def engine_name(self) -> str:
         return self._primary.name
+
+    @property
+    def primary(self) -> DecisionEngine:
+        return self._primary
 
     async def analyze(self, text: str, subject: str | None = None) -> AnalysisResult:
         started = time.perf_counter()
@@ -59,9 +63,17 @@ class DecisionPipeline:
             decision = await self._fallback.decide(body.text, hints)
             engine_name, degraded = self._fallback.name, True
 
-        # 3) Leitplanke: eine deterministisch erkannte Bestellnummer ist ein harter Fakt.
+        # 3) Leitplanken: deterministisch erkannte Fakten überstimmen das Modell.
+        #    - Eine erkannte Bestellnummer ist ein harter Fakt.
+        #    - Anwalts-, Klage-, Polizei- oder Betrugsdrohungen sind immer Stufe 5
+        #      (kleine Decision-Modelle unterschätzen sie messbar).
+        updates: dict[str, object] = {}
         if hints.order_reference_detected and not decision.contains_order_number:
-            decision = decision.model_copy(update={"contains_order_number": True})
+            updates["contains_order_number"] = True
+        if decision.urgency < 5 and detect_legal_threat(f"{hints.subject or ''}\n{body.text}"):
+            updates["urgency"] = 5
+        if updates:
+            decision = decision.model_copy(update=updates)
 
         return AnalysisResult(
             decision=decision,

@@ -127,6 +127,14 @@ _URGENCY_SIGNALS = _signals(
 )
 
 
+_LEGAL_THREAT_SIGNALS = tuple(s for s in _URGENCY_SIGNALS if s.weight >= 5.0)
+
+
+def detect_legal_threat(text: str) -> bool:
+    """Hochpräzises Signal für Anwalts-, Klage-, Polizei- oder Betrugsdrohungen (DE/EN)."""
+    return any(signal.pattern.search(text) for signal in _LEGAL_THREAT_SIGNALS)
+
+
 class HeuristicDecisionEngine:
     name = "heuristic-v1"
 

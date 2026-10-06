@@ -9,8 +9,9 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Minimales, eigenständiges Server-Bundle für das Docker-Image.
-  output: "standalone",
+  // Minimales, eigenständiges Server-Bundle nur für das Docker-Image
+  // (Dockerfile setzt NEXT_OUTPUT_STANDALONE=1; Vercel baut ohne).
+  output: process.env.NEXT_OUTPUT_STANDALONE === "1" ? "standalone" : undefined,
   poweredByHeader: false,
   serverExternalPackages: ["pg"],
   async headers() {

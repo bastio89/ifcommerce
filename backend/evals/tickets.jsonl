@@ -1,0 +1,30 @@
+{"text": "Hallo, wo bleibt meine Bestellung 4711-2025? Ich warte seit 10 Tagen und die Sendungsverfolgung zeigt nichts an.", "category": "WHERE_IS_MY_ORDER", "urgency": 3, "cancel": false}
+{"text": "Seit DREI Wochen warte ich auf mein Paket!!! Niemand antwortet. Wenn es nicht bis Freitag da ist, schalte ich meinen Anwalt ein.", "category": "WHERE_IS_MY_ORDER", "urgency": 5, "cancel": false}
+{"text": "Guten Tag, wann wird meine Bestellung #10088 voraussichtlich versendet?", "category": "WHERE_IS_MY_ORDER", "urgency": 2, "cancel": false}
+{"text": "DHL sagt, das Paket wurde zugestellt, aber ich habe nichts bekommen. Was nun?", "category": "WHERE_IS_MY_ORDER", "urgency": 3, "cancel": false}
+{"text": "Hi, my order hasn't arrived yet and the tracking hasn't updated in a week. Can you check?", "category": "WHERE_IS_MY_ORDER", "urgency": 3, "cancel": false}
+{"text": "This is the third time I'm writing about my missing package. Unacceptable. I want an answer today.", "category": "WHERE_IS_MY_ORDER", "urgency": 4, "cancel": false}
+{"text": "Ich möchte die Schuhe zurückschicken, sie sind zu klein. Wie bekomme ich ein Rücksendeetikett?", "category": "RETURN_OR_REFUND", "urgency": 2, "cancel": false}
+{"text": "Hallo, ich habe gestern aus Versehen zweimal bestellt (Bestellnummer #10234). Bitte storniert die zweite Bestellung sofort, bevor sie verschickt wird.", "category": "RETURN_OR_REFUND", "urgency": 4, "cancel": true}
+{"text": "Die Retoure ist seit zwei Wochen bei euch angekommen, aber ich habe mein Geld immer noch nicht zurück.", "category": "RETURN_OR_REFUND", "urgency": 3, "cancel": false}
+{"text": "Bitte Auftrag ORD-551203 stornieren, ich brauche die Sachen nicht mehr.", "category": "RETURN_OR_REFUND", "urgency": 4, "cancel": true}
+{"text": "I'd like to exchange the jacket for a size L. How does that work?", "category": "RETURN_OR_REFUND", "urgency": 2, "cancel": false}
+{"text": "Please cancel my order immediately, I found it cheaper elsewhere.", "category": "RETURN_OR_REFUND", "urgency": 4, "cancel": true}
+{"text": "Ich widerrufe hiermit den Kauf und möchte den vollen Betrag erstattet bekommen.", "category": "RETURN_OR_REFUND", "urgency": 2, "cancel": false}
+{"text": "Der Mixer ist kaputt angekommen, die Glaskanne hat einen Sprung.", "category": "PRODUCT_ISSUE", "urgency": 3, "cancel": false}
+{"text": "Ihr habt mir die falsche Farbe geschickt, ich hatte Blau bestellt, nicht Grün.", "category": "PRODUCT_ISSUE", "urgency": 3, "cancel": false}
+{"text": "Die Kaffeemaschine funktioniert nach zwei Wochen nicht mehr. Ist das ein Garantiefall?", "category": "PRODUCT_ISSUE", "urgency": 3, "cancel": false}
+{"text": "Im Paket fehlt das Ladekabel. Bitte schickt es nach.", "category": "PRODUCT_ISSUE", "urgency": 2, "cancel": false}
+{"text": "The zipper broke the first time I used the bag. Terrible quality, I'm really disappointed.", "category": "PRODUCT_ISSUE", "urgency": 3, "cancel": false}
+{"text": "Das Gerät hat beim Einschalten geraucht! Das ist gefährlich, ich erwarte sofort eine Reaktion, sonst gehe ich zur Verbraucherzentrale.", "category": "PRODUCT_ISSUE", "urgency": 5, "cancel": false}
+{"text": "Mir wurde der Betrag für Auftrag ORD-889911 doppelt per PayPal abgebucht. Bitte prüfen Sie das.", "category": "PAYMENT_OR_INVOICE", "urgency": 4, "cancel": false}
+{"text": "Können Sie mir bitte eine Rechnung mit ausgewiesener Mehrwertsteuer für meine Firma schicken?", "category": "PAYMENT_OR_INVOICE", "urgency": 2, "cancel": false}
+{"text": "Mein Gutscheincode WELCOME10 funktioniert an der Kasse nicht.", "category": "PAYMENT_OR_INVOICE", "urgency": 2, "cancel": false}
+{"text": "Ich habe eine Mahnung bekommen, obwohl ich längst per Überweisung bezahlt habe!", "category": "PAYMENT_OR_INVOICE", "urgency": 4, "cancel": false}
+{"text": "You charged my credit card twice. If this isn't fixed by tomorrow I'll file a chargeback and report you for fraud.", "category": "PAYMENT_OR_INVOICE", "urgency": 5, "cancel": false}
+{"text": "Which payment methods do you accept? Is Klarna possible?", "category": "PAYMENT_OR_INVOICE", "urgency": 1, "cancel": false}
+{"text": "Hallo zusammen, ist die Regenjacke in Größe M bald wieder auf Lager?", "category": "GENERAL_INQUIRY", "urgency": 1, "cancel": false}
+{"text": "Liefert ihr auch in die Schweiz und wie hoch sind die Versandkosten?", "category": "GENERAL_INQUIRY", "urgency": 1, "cancel": false}
+{"text": "Fällt die Hose eher klein oder groß aus? Ich trage normalerweise 32/32.", "category": "GENERAL_INQUIRY", "urgency": 1, "cancel": false}
+{"text": "Do you offer gift wrapping for orders?", "category": "GENERAL_INQUIRY", "urgency": 1, "cancel": false}
+{"text": "Wir sind ein Café und interessieren uns für eine Kooperation. Wer ist der richtige Ansprechpartner?", "category": "GENERAL_INQUIRY", "urgency": 1, "cancel": false}

@@ -1,0 +1,19 @@
+# TLS-Terminierung für DecideCommerce (docker compose --profile https).
+# DNS: APP_DOMAIN und API_DOMAIN müssen per A/AAAA-Record auf diesen Server zeigen.
+# Caddy holt und erneuert die Let's-Encrypt-Zertifikate automatisch.
+{
+	email {$ACME_EMAIL}
+}
+
+# Decision API (Widget, REST, Stripe-Webhooks)
+{$API_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy backend:8000
+}
+
+# Händler-Dashboard & Landingpage. Läuft das Frontend auf Vercel, kann dieser
+# Block entfallen (APP_DOMAIN dann einfach auf dem Default lassen).
+{$APP_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy frontend:3000
+}

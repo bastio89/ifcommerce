@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -22,6 +24,7 @@ from app.decision.anthropic_engine import AnthropicDecisionEngine
 from app.decision.base import DecisionEngine
 from app.decision.heuristic_engine import HeuristicDecisionEngine
 from app.decision.pipeline import DecisionPipeline
+from app.decision.systemone_engine import SystemOneDecisionEngine
 from app.middleware.api_key_auth import ApiKeyAuthMiddleware
 from app.routers import analyze, demo, health, webhooks
 from app.services.entitlements import EntitlementService
@@ -46,14 +49,20 @@ _ERROR_CODES = {
 }
 
 
+def build_primary_engine(settings: Settings) -> DecisionEngine | None:
+    """Wählt die Decision-Engine; None bedeutet: nur die Heuristik."""
+    if settings.decision_engine == "systemone":
+        return SystemOneDecisionEngine(settings)
+    if settings.anthropic_enabled:
+        return AnthropicDecisionEngine(settings)
+    if settings.decision_engine == "anthropic":
+        logger.warning("DECISION_ENGINE=anthropic, aber ANTHROPIC_API_KEY fehlt – nutze Heuristik.")
+    return None
+
+
 async def build_container(settings: Settings) -> Container:
     pool = await create_pool(settings)
-
-    primary: DecisionEngine | None = None
-    if settings.llm_enabled:
-        primary = AnthropicDecisionEngine(settings)
-    elif settings.decision_engine == "anthropic":
-        logger.warning("DECISION_ENGINE=anthropic, aber ANTHROPIC_API_KEY fehlt – nutze Heuristik.")
+    primary = build_primary_engine(settings)
 
     stripe_client: stripe.StripeClient | None = None
     if settings.stripe_enabled and settings.stripe_secret_key is not None:
@@ -116,12 +125,23 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
         app.state.container = container
         if container.usage_reporter is not None:
             container.usage_reporter.start()
+        engine = container.pipeline.primary
+        # Lokale Modelle vorladen, ohne den Start zu blockieren (erster Ollama-Aufruf ist langsam).
+        warm_up = getattr(engine, "warm_up", None)
+        warm_up_task = asyncio.create_task(warm_up()) if warm_up is not None else None
         logger.info("DecideCommerce API ready (engine=%s)", container.pipeline.engine_name)
         try:
             yield
         finally:
+            if warm_up_task is not None:
+                warm_up_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await warm_up_task
             if container.usage_reporter is not None:
                 await container.usage_reporter.stop()
+            close_engine = getattr(engine, "aclose", None)
+            if close_engine is not None:
+                await close_engine()
             await container.pool.close()
 
     app = FastAPI(

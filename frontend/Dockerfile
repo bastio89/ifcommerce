@@ -20,6 +20,7 @@ COPY frontend/package.json frontend/package-lock.json frontend/prisma.config.ts 
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
 FROM deps AS builder
+ENV NEXT_OUTPUT_STANDALONE=1
 COPY frontend/ ./
 RUN npm run build
 
