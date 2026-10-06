@@ -219,6 +219,8 @@ SYSTEMONE_MODEL=tev1:0.8b        # GPU: tev1:4b + docker-compose.gpu.yml
 docker compose up --build        # lädt das Modell beim ersten Start (~0,8 bzw. 4,5 GB)
 ```
 
+Der Job `ollama-pull` lädt das Modell nur, wenn es noch fehlt; Neustarts brauchen also keine Verbindung zur Ollama-Registry. Schlägt der erste Download fehl, startet das Backend trotzdem und entscheidet mit der Heuristik (`degraded: true`); das Log nennt den passenden `ollama pull`-Befehl.
+
 Ohne Docker: Ollama ≥ 0.35 installieren, `ollama pull tev1:0.8b`, dann `DECISION_ENGINE=systemone SYSTEMONE_BASE_URL=http://localhost:11434` für das Backend setzen.
 
 **Messung** (`backend/evals/run_eval.py`, 30 gelabelte DE/EN-Tickets, Ollama 0.35.1, 4 CPU-Kerne, Storno-Schwelle 0,9):
