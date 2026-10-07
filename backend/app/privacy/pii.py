@@ -1,4 +1,4 @@
-"""DSGVO-Schutzschicht: anonymisiert personenbezogene Daten, BEVOR Text die KI erreicht.
+"""PII-Schutzschicht: maskiert erkannte personenbezogene Daten vor einem Modellaufruf.
 
 Die Pipeline arbeitet rein lokal (Regex + Validierungslogik, keine externen
 Calls) und läuft in Mikrosekunden. Reihenfolge:
@@ -31,7 +31,8 @@ PLACEHOLDERS = {
     "ADDRESS": "[ANONYMOUS_ADDRESS]",
 }
 
-_CAP = r"[A-ZÄÖÜ][a-zäöüß]+"  # ein großgeschriebenes Wort (Namensbestandteil)
+_CAP = r"[^\W\d_]+"  # Unicode-Buchstaben; Großschreibung wird nach dem Treffer geprüft.
+_CAP_ASCII = r"[A-ZÄÖÜ][a-zäöüß]+"
 _NAME_SEQ = rf"{_CAP}(?:-{_CAP})?(?:[ \t]+{_CAP}(?:-{_CAP})?){{0,2}}"
 
 # ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ _DATE_LIKE = re.compile(r"^\d{1,2}[./]\d{1,2}[./]\d{2,4}$")
 # ---------------------------------------------------------------------------
 _STREET_SUFFIX = r"(?:straße|strasse|str\.|weg|gasse|allee|platz|ring|damm|ufer|chaussee|steig|pfad)"
 _STREET = re.compile(
-    rf"\b(?:{_CAP}(?:-{_CAP})*{_STREET_SUFFIX}"
+    rf"\b(?:{_CAP_ASCII}(?:-{_CAP_ASCII})*{_STREET_SUFFIX}"
     r"|[A-ZÄÖÜ][a-zäöüß]+\s+(?:Straße|Strasse|Str\.|Weg|Gasse|Allee|Platz|Ring|Damm|Ufer|Chaussee))"
     r"\s+\d{1,4}\s?[a-zA-Z]?\b"
     r"|\b\d{1,5}\s+(?:[A-Z][a-z]+\s){1,3}(?:Street|St\.|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?"
@@ -225,6 +226,8 @@ class _Scrubber:
             name = self._trim_name(match.group("name"), require_known_first_name=require_known_first_name)
             if name is None:
                 return match.group(0)
+            if any(not token[:1].isupper() for token in name.split()):
+                return match.group(0)
             self.counts["NAME"] += 1
             whole = match.group(0)
             start = match.start("name") - match.start()
@@ -239,6 +242,10 @@ class _Scrubber:
             i = 0
             while i < len(tokens):
                 token = tokens[i]
+                if not token[:1].isupper():
+                    out.append(token)
+                    i += 1
+                    continue
                 if token.split("-")[0].lower() in FIRST_NAMES:
                     # Vorname + optional ein Nachname (sofern kein Nicht-Namens-Token).
                     if i + 1 < len(tokens) and tokens[i + 1].lower() not in NON_NAME_TOKENS:
@@ -318,5 +325,5 @@ def _valid_iban(value: str) -> bool:
 
 
 def scrub_pii(text: str) -> ScrubResult:
-    """Anonymisiert personenbezogene Daten im Text. Idempotent und seiteneffektfrei."""
+    """Maskiert erkannte PII-Muster. Das Ergebnis ist nicht garantiert anonym."""
     return _Scrubber(text.replace("\x00", "")).run()

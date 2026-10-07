@@ -5,7 +5,7 @@ import { SectionHeading } from "@/components/marketing/section-heading";
 const steps = [
   {
     icon: ShieldCheck,
-    title: "1 · Anonymisieren",
+    title: "1 · Erkannte PII maskieren",
     text: "Eine lokale Schutzschicht ersetzt E-Mails, Telefonnummern, Klarnamen, Adressen, IBANs und Kartennummern durch Platzhalter wie [ANONYMOUS_EMAIL], bevor irgendetwas die KI erreicht. Bestellnummern bleiben erhalten.",
   },
   {

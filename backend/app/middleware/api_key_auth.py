@@ -1,13 +1,12 @@
-"""ASGI-Middleware: API-Key-Validierung, Mandanten-Zuordnung, Kontingente und Metering.
+"""ASGI-Middleware: API-Key-Validierung, Mandanten-Zuordnung und Rate-Limits.
 
 Ablauf für geschützte Routen:
 
 1. ``x-api-key`` gegen PostgreSQL validieren (mit kurzem Cache) -> TenantContext
 2. Publishable Keys: Browser-Origin gegen die Allowlist des Keys prüfen
 3. Rate-Limit pro Key (Token Bucket)
-4. Tarif-/Subscription-Prüfung (Free-Kontingent, gesperrte Pro-Abos)
-5. Request ausführen; bei Erfolg (2xx) einen UsageLog-Eintrag schreiben, BEVOR
-   die Antwort den Client erreicht – jede ausgelieferte Analyse ist gemessen.
+4. Tarif-/Kontingent-Prüfung und Usage-Metering erfolgen beim dauerhaften Job
+    atomar mit dem Ergebnis.
 
 Als reine ASGI-Middleware (statt BaseHTTPMiddleware) blockiert sie kein
 Streaming und fügt praktisch keinen Overhead hinzu.
@@ -16,24 +15,18 @@ Streaming und fügt praktisch keinen Overhead hinzu.
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Receive, Scope, Send
 
-from app.services.tenants import ApiKeyType, TenantContext
-from app.services.usage import UsageDetails
+from app.services.tenants import ApiKeyType
 
 if TYPE_CHECKING:
     from app.container import Container
 
-logger = logging.getLogger(__name__)
-
-# (Methode, Pfad) -> OperationType, das bei Erfolg gemessen wird.
-METERED_ROUTES: dict[tuple[str, str], str] = {
-    ("POST", "/api/v1/analyze-ticket"): "ANALYZE_TICKET",
-}
+# Routen, die einen API-Key benötigen und selbst Tarif-/Usage-Regeln anwenden.
+PROTECTED_ROUTES = {("POST", "/api/v1/analyze-ticket")}
 
 
 async def _send_json(send: Send, status: int, code: str, message: str, headers: dict[str, str] | None = None) -> None:
@@ -57,8 +50,15 @@ class ApiKeyAuthMiddleware:
         self._container_getter = container_getter
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        operation = METERED_ROUTES.get((scope.get("method", ""), scope.get("path", "").rstrip("/")))
-        if scope["type"] != "http" or operation is None:
+        method = scope.get("method", "")
+        path = scope.get("path", "").rstrip("/")
+        is_protected_route = (method, path) in PROTECTED_ROUTES
+        is_job_status = (
+            method == "GET"
+            and path.startswith("/api/v1/analysis-jobs/")
+            and "/" not in path.removeprefix("/api/v1/analysis-jobs/")
+        )
+        if scope["type"] != "http" or (not is_protected_route and not is_job_status):
             # Nicht geschützt (inkl. CORS-Preflight und falscher Methoden -> 405 vom Router).
             await self.app(scope, receive, send)
             return
@@ -90,7 +90,7 @@ class ApiKeyAuthMiddleware:
             if tenant.api_key_type is ApiKeyType.PUBLISHABLE
             else container.settings.rate_limit_secret_key_per_minute
         )
-        allowed, retry_after = container.rate_limiter.acquire(tenant.api_key_id, per_minute=per_minute)
+        allowed, retry_after = await container.rate_limiter.acquire(tenant.api_key_id, per_minute=per_minute)
         if not allowed:
             await _send_json(
                 send,
@@ -101,40 +101,12 @@ class ApiKeyAuthMiddleware:
             )
             return
 
-        entitlement = await container.entitlements.check(tenant)
-        if not entitlement.allowed:
-            await _send_json(
-                send, entitlement.status_code, entitlement.error_code or "forbidden", entitlement.message or ""
-            )
-            return
-
         state = scope.setdefault("state", {})
         state["tenant"] = tenant
+        state["api_key_id"] = tenant.api_key_id
 
-        async def metering_send(message: Message) -> None:
-            if message["type"] == "http.response.start" and 200 <= message["status"] < 300:
-                await self._record_usage(container, tenant, operation, entitlement.billable, state.get("usage_details"))
-            await send(message)
+        if not is_protected_route:
+            await self.app(scope, receive, send)
+            return
 
-        await self.app(scope, receive, metering_send)
-
-    @staticmethod
-    async def _record_usage(
-        container: Container,
-        tenant: TenantContext,
-        operation: str,
-        billable: bool,
-        details: UsageDetails | None,
-    ) -> None:
-        try:
-            await container.usage.record(
-                tenant_id=tenant.tenant_id,
-                api_key_id=tenant.api_key_id,
-                operation_type=operation,
-                billable=billable,
-                details=details,
-            )
-        except Exception:
-            # Verfügbarkeit vor Abrechnung: die Analyse wird trotzdem ausgeliefert,
-            # der Ausfall muss aber alarmiert werden.
-            logger.exception("USAGE_METERING_FAILED tenant=%s operation=%s", tenant.tenant_id, operation)
+        await self.app(scope, receive, send)

@@ -75,6 +75,7 @@ def settings(database: str) -> Settings:
         stripe_webhook_secret=WEBHOOK_SECRET,
         internal_api_secret=INTERNAL_SECRET,
         free_tier_monthly_limit=FREE_LIMIT,
+        analysis_sync_wait_seconds=5.0,
         api_key_cache_ttl_seconds=0,
         db_pool_min_size=1,
         db_pool_max_size=4,

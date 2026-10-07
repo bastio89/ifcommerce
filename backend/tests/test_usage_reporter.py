@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
 import stripe
 from fastapi.testclient import TestClient
 
-from app.services.usage import StripeUsageReporter
+from app.services.usage import StripeUsageReporter, UsageDetails, UsageMeter
 from tests.conftest import Db
 
 
@@ -19,6 +20,37 @@ class FakeMeterEvents:
         if params["identifier"] in self._fail_for:
             raise stripe.APIConnectionError("network down")
         self.calls.append(params)
+
+
+class FakeConnection:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def fetchval(self, query: str, *args: Any) -> str:
+        self.calls.append((query, args))
+        return "usage-id"
+
+
+def test_usage_can_be_recorded_inside_job_transaction() -> None:
+    connection = FakeConnection()
+    meter = UsageMeter(None)  # type: ignore[arg-type]
+
+    usage_id = asyncio.run(
+        meter.record(
+            tenant_id="tenant-id",
+            api_key_id="key-id",
+            operation_type="ANALYZE_TICKET",
+            billable=True,
+            details=UsageDetails(category="PRODUCT_ISSUE", urgency=3, engine="heuristic-v1", latency_ms=10),
+            connection=connection,  # type: ignore[arg-type]
+        )
+    )
+
+    assert usage_id == "usage-id"
+    assert len(connection.calls) == 1
+    query, args = connection.calls[0]
+    assert "INSERT INTO usage_logs" in query
+    assert args == ("tenant-id", "key-id", "ANALYZE_TICKET", "PRODUCT_ISSUE", 3, "heuristic-v1", 10, True)
 
 
 def _reporter(client: TestClient, events: FakeMeterEvents) -> StripeUsageReporter:

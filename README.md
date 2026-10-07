@@ -1,6 +1,6 @@
 # DecideCommerce
 
-**Semantische If-Statements für deinen Support.** DecideCommerce klassifiziert Support-Tickets und E-Mails von Online-Shops in Echtzeit und liefert in einem einzigen Durchlauf ein festes Entscheidungsobjekt: Kategorie, Dringlichkeit, Intent-Flags und Konfidenz. Personenbezogene Daten werden anonymisiert, bevor irgendein Text ein KI-Modell erreicht.
+**Strukturierte Triage für E-Commerce-Support.** DecideCommerce liefert Kategorie, Dringlichkeit, Intent-Flags und Konfidenz. Eine lokale Schutzschicht maskiert erkannte PII-Muster vor dem Modellaufruf; die Erkennung ist heuristisch und keine garantierte Anonymisierung.
 
 ```json
 {
@@ -55,17 +55,17 @@ flowchart LR
   FE -- "Live-Demo (internes Secret)" --> BE
   FE -- "Checkout / Portal" --> ST
   BE -- "asyncpg" --> PG
-  BE -- "anonymisierter Text<br/>/v1/systemone" --> LLM
+  BE -- "PII-maskierter Text<br/>/v1/systemone" --> LLM
   ST -- "customer.subscription.*" --> BE
   BE -- "Meter Events" --> ST
 ```
 
 **Request-Pfad `POST /api/v1/analyze-ticket`:**
 
-1. `ApiKeyAuthMiddleware` (reine ASGI-Middleware): Key-Hash gegen PostgreSQL validieren → Tenant zuordnen → Origin-Allowlist (Publishable Keys) → Rate-Limit → Tarif/Kontingent prüfen.
-2. **DSGVO-Schutzschicht** (`backend/app/privacy/pii.py`): E-Mails, Telefonnummern, Klarnamen, Adressen, IBANs (Prüfsumme), Kreditkarten (Luhn) und IPs werden durch Platzhalter wie `[ANONYMOUS_EMAIL]` ersetzt. Bestellnummern bleiben erhalten.
+1. `ApiKeyAuthMiddleware` (reine ASGI-Middleware): Key-Hash gegen PostgreSQL validieren → Tenant zuordnen → Origin-Allowlist (Publishable Keys) → Rate-Limit. Tarif, Kontingent und Queue-Kapazität werden bei der Job-Annahme pro Tenant atomar geprüft.
+2. **Lokale PII-Maskierung** (`backend/app/privacy/pii.py`): Erkannte E-Mails, Telefonnummern, Klarnamen, Adressen, IBANs (Prüfsumme), Kreditkarten (Luhn) und IPs werden durch Platzhalter wie `[ANONYMOUS_EMAIL]` ersetzt. Die Heuristiken erkennen nicht jede PII. Bestellnummern bleiben erhalten.
 3. **Decision Engine** (Single Pass, per `DECISION_ENGINE` wählbar): ein lokales Decision-Modell über Ollama (Tev1), Claude mit nativen Structured Outputs oder TypeSafe Jev, siehe [Decision-Engines](#decision-engines). Fällt die Engine aus (Timeout, Rate-Limit, Refusal, Modell nicht geladen), entscheidet eine deterministische Heuristik; die Antwort trägt dann `degraded: true`. Deterministische Leitplanken gelten für jede Engine: Eine erkannte Bestellnummer setzt `contains_order_number`, eine Anwalts-, Klage-, Polizei- oder Betrugsdrohung setzt die Dringlichkeit auf 5.
-4. Bei einer 2xx-Antwort schreibt die Middleware **vor** der Auslieferung einen `UsageLog`-Eintrag. Pro-Nutzung wird asynchron als Stripe-Meter-Event gemeldet.
+4. Schnelle Analysen antworten synchron. Dauert die Analyse länger als `ANALYSIS_SYNC_WAIT_SECONDS`, wird ein dauerhafter Job mit `202 Accepted` zurückgegeben. Ergebnis und `UsageLog` werden nach erfolgreicher Analyse gemeinsam gespeichert; Pro-Nutzung wird anschließend als Stripe-Meter-Event gemeldet.
 
 ## Verzeichnisstruktur
 
@@ -94,7 +94,7 @@ flowchart LR
 │   │   ├── decision/             # systemone_engine · anthropic_engine · heuristic_engine · pipeline
 │   │   ├── services/             # tenants · entitlements · usage · stripe_sync · rate_limit
 │   │   └── routers/              # analyze · webhooks · demo · health
-│   └── tests/                    # 91 Tests (Unit + Integration gegen PostgreSQL)
+│   └── tests/                    # Unit + Integration gegen PostgreSQL
 ├── frontend/                     # Next.js 16 (App Router), Tailwind CSS 4, TypeScript
 │   ├── Dockerfile                # deps → builder → migrator / runner (standalone)
 │   ├── prisma.config.ts          # zeigt auf ../prisma
@@ -171,6 +171,14 @@ Alle Variablen sind in [`.env.example`](.env.example) dokumentiert. Die wichtigs
 | `STRIPE_PRICE_PRO_BASE`, `STRIPE_PRICE_PRO_METERED` | frontend | Preis-IDs für Checkout |
 | `STRIPE_METER_EVENT_NAME` | backend | Event-Name des Billing Meters |
 | `FREE_TIER_MONTHLY_LIMIT` | beide | Analysen pro Monat im Free-Tarif (Standard 250) |
+| `ANALYSIS_SYNC_WAIT_SECONDS` | backend | Maximale Inline-Wartezeit vor `202 Accepted` (Standard 1,5 s) |
+| `ANALYSIS_WORKER_CONCURRENCY` | backend | Gleichzeitige Job-Worker pro Backend-Prozess |
+| `ANALYSIS_MAX_PENDING_PER_TENANT` | backend | Schutz vor unbegrenzt anwachsenden Tenant-Queues |
+| `ANALYSIS_JOB_RETENTION_DAYS` | backend | Aufbewahrungszeit für Jobstatus und anonymisiertes Ergebnis |
+| `MAX_TICKET_CHARS` | backend | Maximale Textlänge einer einzelnen Nachricht (Standard 20.000) |
+| `MAX_REQUEST_BODY_BYTES` | backend | Harte Grenze für Analyse-Request-Bodies vor JSON-Parsing (Standard 262.144 Bytes) |
+| `RATE_LIMIT_SECRET_KEY_PER_MINUTE` | backend | Shared Token-Bucket-Limit für Secret Keys, in PostgreSQL gespeichert (Standard 600) |
+| `RATE_LIMIT_PUBLISHABLE_KEY_PER_MINUTE` | backend | Shared Token-Bucket-Limit für Publishable Keys (Standard 60) |
 
 Alle Frontend-Variablen werden **zur Laufzeit** gelesen (keine `NEXT_PUBLIC_*`), damit ein einziges Image in jeder Umgebung läuft.
 
@@ -183,6 +191,15 @@ curl -X POST http://localhost:8000/api/v1/analyze-ticket \
   -d '{"text": "Wo bleibt meine Bestellung #1001? Ich warte seit 2 Wochen!", "external_id": "zendesk-48213"}'
 ```
 
+Der Aufrufer wählt keinen Modus: Das Backend wartet standardmäßig bis zu 1,5 Sekunden. Ist das Ergebnis dann noch nicht fertig, kommt `202` mit `id`, `status` und `status_url`. Mit demselben API-Key den Status abfragen; `Retry-After` gibt den nächsten sinnvollen Abfragezeitpunkt an. Sobald die Analyse fertig ist, enthält `result` dieselbe Antwort wie die synchrone Route.
+
+```bash
+curl http://localhost:8000/api/v1/analysis-jobs/job_<id> \
+  -H "x-api-key: dc_sk_…"
+```
+
+Gleiche Retries mit derselben `external_id` und identischem Inhalt liefern automatisch denselben Job. Ein expliziter `Idempotency-Key` ist für Tickets ohne `external_id` empfohlen; gleicher Schlüssel mit anderem Inhalt wird mit `409 idempotency_key_reused` abgelehnt. Jobs speichern den vorab maskierten Text und das Ergebnis, einschließlich der maskierten Textfassung, bis `ANALYSIS_JOB_RETENTION_DAYS` abläuft. `degraded`-Ergebnisse werden protokolliert, aber nicht an Stripe gemeldet. Publishable Keys dürfen Statusjobs ebenfalls nur von ihrer freigegebenen Origin abrufen.
+
 | Feld | Typ | Beschreibung |
 |---|---|---|
 | `category` | Enum | `WHERE_IS_MY_ORDER`, `RETURN_OR_REFUND`, `PRODUCT_ISSUE`, `PAYMENT_OR_INVOICE`, `GENERAL_INQUIRY` |
@@ -191,10 +208,10 @@ curl -X POST http://localhost:8000/api/v1/analyze-ticket \
 | `flags.contains_order_number` | bool | Bestell-/Rechnungsnummer im Text |
 | `confidence` | 0.0–1.0 | Sicherheit der Klassifikation |
 | `engine`, `degraded` | | Welche Engine entschieden hat; `true`, wenn der Fallback griff |
-| `pii` | | Anzahl anonymisierter Entitäten je Typ |
-| `anonymized_text` | string | Der Text, wie ihn das Modell gesehen hat |
+| `pii` | | Anzahl maskierter Entitäten je Typ |
+| `anonymized_text` | string | Der Text, wie ihn das Modell gesehen hat; maskierte Inhalte können weiterhin PII enthalten |
 
-Fehler haben immer die Form `{"error": {"code": "...", "message": "..."}}`: `401 missing_api_key|invalid_api_key`, `402 monthly_quota_exceeded|subscription_inactive`, `403 origin_not_allowed`, `413 payload_too_large`, `422 invalid_request`, `429 rate_limited` (mit `Retry-After`).
+Fehler haben immer die Form `{"error": {"code": "...", "message": "..."}}`: `401 missing_api_key|invalid_api_key`, `402 monthly_quota_exceeded|subscription_inactive`, `403 origin_not_allowed`, `409 idempotency_key_reused`, `413 payload_too_large`, `422 invalid_request`, `429 rate_limited|analysis_queue_full` (mit `Retry-After`), `503 analysis_failed`.
 
 **API-Keys:** `dc_sk_…` (Secret, nur serverseitig) und `dc_pk_…` (Publishable, für das Widget, an freigegebene Domains gebunden und strenger rate-limitiert). Gespeichert wird ausschließlich ein SHA-256-Hash; der Klartext wird genau einmal im Dashboard angezeigt. Ein Widerruf greift nach spätestens `API_KEY_CACHE_TTL_SECONDS` (Standard 15 s).
 
@@ -232,7 +249,7 @@ Ohne Docker: Ollama ≥ 0.35 installieren, `ollama pull tev1:0.8b`, dann `DECISI
 | `tev1:0.8b` | 90 % | 70 % / 93 % | 75 % / 100 % | 1,6 s |
 | Heuristik | 93 % | 67 % / 93 % | 100 % / 100 % | < 1 ms |
 
-Die Tickets sind synthetisch und vom selben Autor wie die Heuristik-Regeln – die Heuristik ist darauf also begünstigt. Vor dem Umstieg mit echten (anonymisierten) Tickets messen:
+Die Tickets sind synthetisch und vom selben Autor wie die Heuristik-Regeln – die Heuristik ist darauf also begünstigt. Vor dem Umstieg mit echten, sorgfältig bereinigten Tickets messen; PII-Maskierung garantiert keine Anonymisierung:
 
 ```bash
 cd backend
@@ -265,6 +282,7 @@ Ein EU-Server mit Docker, z. B. Hetzner (Stand Oktober 2026, netto): CPU **AX42*
 # DNS: app.deine-domain.de und api.deine-domain.de -> Server-IP
 # .env
 COMPOSE_PROFILES=local-ai,https
+ENVIRONMENT=production
 DECISION_ENGINE=systemone
 APP_DOMAIN=app.deine-domain.de
 API_DOMAIN=api.deine-domain.de
@@ -306,9 +324,9 @@ Das Frontend nutzt auf Vercel `attachDatabasePool` (`@vercel/functions`), damit 
 
 Das Widget hängt sich in der Capture-Phase an das `submit`-Event, analysiert die Nachricht und fügt diese Hidden-Inputs hinzu, bevor das Formular per `requestSubmit()` final abgeschickt wird (inklusive Original-Submit-Button und Shop-eigenen Handlern):
 
-`dc_status` (`ok` | `error` | `timeout`), `dc_category`, `dc_urgency`, `dc_is_cancellation_request`, `dc_contains_order_number`, `dc_confidence`, `dc_analysis_id`
+`dc_status` (`ok` | `degraded` | `queued` | `processing` | `error` | `timeout`), `dc_degraded`, `dc_category`, `dc_urgency`, `dc_is_cancellation_request`, `dc_contains_order_number`, `dc_confidence`, `dc_analysis_id`, `dc_job_id`, `dc_status_url`, `dc_idempotency_key`
 
-Das Formular wird **nie blockiert**: Bei Timeout (`data-timeout`, Standard 3000 ms) oder Fehler wird mit `dc_status=error|timeout` gesendet. Secret Keys verweigert das Widget. Für AJAX-Formulare gibt es `window.DecideCommerce.analyze(text)` und das Event `decidecommerce:decision`.
+Das Formular wird **nie auf die gesamte Analyse blockiert**: Bei schneller Antwort kommen die Entscheidungsfelder direkt mit. Bei `202` wird sofort mit `dc_status=queued|processing` und Job-Referenz gesendet; das Shop-Backend kann `dc_status_url` abfragen. Secret Keys verweigert das Widget. Für AJAX-Formulare gibt es `window.DecideCommerce.analyze(text)`, `getJob(id)`, `waitForJob(id)` und die Events `decidecommerce:processing` sowie `decidecommerce:decision`.
 
 ## Stripe einrichten
 
@@ -356,4 +374,4 @@ Die Tests decken u. a. die PII-Anonymisierung, das System-One-Protokoll (Antwort
 - [ ] Stripe im Live-Modus einrichten (siehe oben) und Webhook-Zustellung prüfen
 - [ ] Impressum und Datenschutzerklärung ausfüllen (`frontend/src/app/impressum`, `…/datenschutz`), AV-Verträge mit KI-Anbieter, Hosting und Stripe
 - [ ] Postgres-Backups und Monitoring; Alarm auf `USAGE_METERING_FAILED` im Backend-Log
-- [ ] Bei mehreren Backend-/Frontend-Replikas: Rate-Limiter (`services/rate_limit.py`, `lib/rate-limit.ts`) auf Redis umstellen
+- [ ] Bei mehreren Frontend-Replikas den Besucher-IP-Limiter für die Live-Demo auf einen gemeinsamen Redis-/Upstash-Store umstellen; Backend-API-Key-Limits teilen sich PostgreSQL.

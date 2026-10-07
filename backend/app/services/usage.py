@@ -51,10 +51,10 @@ class UsageMeter:
         operation_type: str,
         billable: bool,
         details: UsageDetails | None = None,
+        connection: asyncpg.Connection | None = None,
     ) -> str:
         details = details or UsageDetails()
-        return await self._pool.fetchval(
-            _RECORD_SQL,
+        args = (
             tenant_id,
             api_key_id,
             operation_type,
@@ -64,6 +64,9 @@ class UsageMeter:
             details.latency_ms,
             billable,
         )
+        if connection is not None:
+            return await connection.fetchval(_RECORD_SQL, *args)
+        return await self._pool.fetchval(_RECORD_SQL, *args)
 
 
 _PENDING_SQL = """

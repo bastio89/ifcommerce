@@ -49,6 +49,14 @@ enum OperationType {
   ANALYZE_TICKET
 }
 
+enum AnalysisJobStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  DEGRADED
+  FAILED
+}
+
 enum TicketCategory {
   WHERE_IS_MY_ORDER
   RETURN_OR_REFUND
@@ -81,6 +89,7 @@ model Tenant {
   users     User[]
   apiKeys   ApiKey[]
   usageLogs UsageLog[]
+  analysisJobs AnalysisJob[]
 
   @@map("tenants")
 }
@@ -135,9 +144,23 @@ model ApiKey {
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   usageLogs UsageLog[]
+  analysisJobs AnalysisJob[]
+  rateLimitBucket RateLimitBucket?
 
   @@index([tenantId])
   @@map("api_keys")
+}
+
+/// Prozessübergreifender Token-Bucket, geteilt von allen Backend-Instanzen.
+model RateLimitBucket {
+  apiKeyId  String   @id @map("api_key_id") @db.Uuid
+  tokens    Float
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+
+  @@index([updatedAt])
+  @@map("api_rate_limit_buckets")
 }
 
 /// Verbrauchsmessung: ein Eintrag pro erfolgreicher KI-Analyse.
@@ -171,4 +194,37 @@ model StripeEvent {
   processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(3)
 
   @@map("stripe_events")
+}
+
+/// Durable, PII-bereinigter Analyseauftrag; Ergebnis und Eingabe laufen nach Ablauf ab.
+model AnalysisJob {
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId               String            @map("tenant_id") @db.Uuid
+  apiKeyId               String?           @map("api_key_id") @db.Uuid
+  idempotencyKey         String?           @map("idempotency_key")
+  requestHash            String            @map("request_hash")
+  externalId             String?           @map("external_id")
+  anonymizedText          String?           @map("anonymized_text") @db.Text
+  anonymizedSubject       String?           @map("anonymized_subject") @db.Text
+  piiEntities            Json              @map("pii_entities")
+  orderReferenceDetected Boolean           @default(false) @map("order_reference_detected")
+  status                 AnalysisJobStatus @default(QUEUED)
+  billable               Boolean           @default(false)
+  result                 Json?
+  errorCode              String?           @map("error_code")
+  attempts               Int               @default(0)
+  availableAt            DateTime          @default(now()) @map("available_at") @db.Timestamptz(3)
+  leaseExpiresAt         DateTime?         @map("lease_expires_at") @db.Timestamptz(3)
+  leaseToken             String?           @map("lease_token") @db.Uuid
+  expiresAt              DateTime          @map("expires_at") @db.Timestamptz(3)
+  createdAt              DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime          @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([status, availableAt, createdAt])
+  @@index([tenantId, status, createdAt])
+  @@map("analysis_jobs")
 }

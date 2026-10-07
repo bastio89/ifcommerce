@@ -25,7 +25,7 @@ export default function HomePage() {
           <SectionHeading
             eyebrow="Live-Demo"
             title="Probier es mit einer echten Kunden-Mail"
-            description="Füge eine Nachricht ein und sieh die strukturierte Entscheidung des Decision-Modells, inklusive anonymisiertem Eingabetext."
+            description="Füge ein Beispielticket oder synthetischen Text ein und sieh die strukturierte Einschätzung samt maskierter Textfassung."
           />
           <LiveDemo />
         </section>

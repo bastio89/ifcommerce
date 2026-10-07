@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,7 +55,7 @@ class TicketFlags(BaseModel):
 class PiiReport(BaseModel):
     redacted: bool
     entities: dict[str, int] = Field(
-        description="Anzahl der anonymisierten Entitäten je Typ (z. B. EMAIL, PHONE, NAME)."
+        description="Anzahl der maskierten Muster je Typ (z. B. EMAIL, PHONE, NAME); keine Vollständigkeitsgarantie."
     )
 
 
@@ -78,3 +80,19 @@ class ErrorBody(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorBody
+
+
+class AnalysisJobAccepted(BaseModel):
+    id: str
+    status: Literal["queued", "processing"]
+    status_url: str
+    retry_after_seconds: int = 1
+
+
+class AnalysisJobStatusResponse(BaseModel):
+    id: str
+    status: Literal["queued", "processing", "succeeded", "degraded", "failed"]
+    created_at: datetime
+    expires_at: datetime
+    result: AnalyzeTicketResponse | None = None
+    error: ErrorBody | None = None

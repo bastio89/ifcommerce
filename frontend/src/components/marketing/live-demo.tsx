@@ -99,13 +99,13 @@ export function LiveDemo() {
           }}
           rows={9}
           maxLength={2000}
-          placeholder="Füge eine echte Kunden-E-Mail ein …"
+          placeholder="Nutze ein Beispielticket oder füge synthetischen Text ein …"
           className="min-h-56 flex-1 resize-none font-mono text-[13px]"
         />
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <span className="flex items-center gap-1.5 text-xs text-muted">
             <ShieldCheck className="size-3.5 text-good" aria-hidden />
-            Namen, E-Mails und Telefonnummern werden vor der KI anonymisiert.
+            Bitte keine echten Kundendaten einfügen. Erkannte PII-Muster werden vor dem Modellaufruf maskiert.
           </span>
           <Button onClick={analyze} disabled={loading || text.trim().length < 3} variant="accent">
             {loading ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Play className="size-4" aria-hidden />}

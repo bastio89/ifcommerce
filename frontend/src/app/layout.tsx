@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     template: "%s · DecideCommerce",
   },
   description:
-    "DecideCommerce klassifiziert Support-Tickets und E-Mails deines Online-Shops in Echtzeit: Kategorie, Dringlichkeit, Storno-Wunsch und Bestellnummer – DSGVO-konform anonymisiert.",
+    "DecideCommerce unterstützt die Triage von E-Commerce-Support. Erkannte personenbezogene Daten werden vor dem Modellaufruf lokal maskiert.",
   icons: { icon: "/favicon.svg" },
 };
 

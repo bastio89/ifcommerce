@@ -26,9 +26,11 @@ from app.decision.heuristic_engine import HeuristicDecisionEngine
 from app.decision.pipeline import DecisionPipeline
 from app.decision.systemone_engine import SystemOneDecisionEngine
 from app.middleware.api_key_auth import ApiKeyAuthMiddleware
-from app.routers import analyze, demo, health, webhooks
+from app.middleware.request_body_limit import RequestBodyLimitMiddleware
+from app.routers import analysis_jobs, analyze, demo, health, webhooks
+from app.services.analysis_jobs import AnalysisJobService
 from app.services.entitlements import EntitlementService
-from app.services.rate_limit import TokenBucketRateLimiter
+from app.services.rate_limit import DatabaseTokenBucketRateLimiter
 from app.services.stripe_sync import SubscriptionSyncService
 from app.services.tenants import ApiKeyStore
 from app.services.usage import StripeUsageReporter, UsageMeter
@@ -78,14 +80,19 @@ async def build_container(settings: Settings) -> Container:
         subscription = await stripe_client.v1.subscriptions.retrieve_async(subscription_id)
         return subscription.to_dict()
 
+    pipeline = DecisionPipeline(primary=primary, fallback=HeuristicDecisionEngine())
+    entitlements = EntitlementService(pool, free_tier_monthly_limit=settings.free_tier_monthly_limit)
+    usage = UsageMeter(pool)
+    analysis_jobs = AnalysisJobService(pool, pipeline, entitlements, usage, settings)
     container = Container(
         settings=settings,
         pool=pool,
-        pipeline=DecisionPipeline(primary=primary, fallback=HeuristicDecisionEngine()),
+        pipeline=pipeline,
         api_keys=api_keys,
-        entitlements=EntitlementService(pool, free_tier_monthly_limit=settings.free_tier_monthly_limit),
-        usage=UsageMeter(pool),
-        rate_limiter=TokenBucketRateLimiter(),
+        entitlements=entitlements,
+        usage=usage,
+        analysis_jobs=analysis_jobs,
+        rate_limiter=DatabaseTokenBucketRateLimiter(pool),
         subscriptions=SubscriptionSyncService(
             pool,
             fetch_subscription=fetch_subscription if stripe_client else None,
@@ -116,13 +123,16 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        internal_secret = settings.internal_api_secret.get_secret_value() if settings.internal_api_secret else ""
         if settings.environment == "production" and (
-            settings.internal_api_secret is None
-            or settings.internal_api_secret.get_secret_value().startswith("change-me")
+            len(internal_secret) < 32 or internal_secret.lower().startswith(("change-me", "bitte-", "your-"))
         ):
-            logger.warning("INTERNAL_API_SECRET nutzt den Default – vor dem Livegang ein Zufalls-Secret setzen.")
+            raise RuntimeError(
+                "INTERNAL_API_SECRET muss in Produktion ein eigenes Secret mit mindestens 32 Zeichen sein."
+            )
         container = await container_factory(settings)
         app.state.container = container
+        container.analysis_jobs.start()
         if container.usage_reporter is not None:
             container.usage_reporter.start()
         engine = container.pipeline.primary
@@ -137,6 +147,7 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
                 warm_up_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await warm_up_task
+            await container.analysis_jobs.stop()
             if container.usage_reporter is not None:
                 await container.usage_reporter.stop()
             close_engine = getattr(engine, "aclose", None)
@@ -150,8 +161,8 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
         summary="Semantische If-Statements für den E-Commerce-Support.",
         description=(
             "Klassifiziert Support-Tickets und E-Mails in Echtzeit in ein festes Entscheidungsschema "
-            "(Kategorie, Dringlichkeit, Intent-Flags, Konfidenz). Personenbezogene Daten werden vor "
-            "jeder KI-Verarbeitung anonymisiert."
+            "(Kategorie, Dringlichkeit, Intent-Flags, Konfidenz). Eine lokale Schutzschicht maskiert erkannte "
+            "personenbezogene Daten vor dem Modellaufruf; die Erkennung ist nicht vollständig."
         ),
         lifespan=lifespan,
         docs_url="/docs",
@@ -163,12 +174,16 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
 
     # Reihenfolge: zuletzt hinzugefügt = äußerste Schicht. CORS muss außen liegen,
     # damit auch 401/402/429-Antworten im Browser-Widget lesbar sind.
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        analysis_max_bytes=settings.max_request_body_bytes,
+    )
     app.add_middleware(ApiKeyAuthMiddleware, container_getter=get_container)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_allow_origins,
         allow_methods=["POST", "GET", "OPTIONS"],
-        allow_headers=["x-api-key", "content-type"],
+        allow_headers=["x-api-key", "content-type", "idempotency-key"],
         max_age=86_400,
     )
 
@@ -190,6 +205,7 @@ def create_app(settings: Settings | None = None, container_factory: ContainerFac
 
     app.include_router(health.router)
     app.include_router(analyze.router)
+    app.include_router(analysis_jobs.router)
     app.include_router(webhooks.router)
     app.include_router(demo.router)
     return app

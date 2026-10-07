@@ -14,9 +14,16 @@ _PRO_ACTIVE = {SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, Subscript
 _PRO_LOCKED = {SubscriptionStatus.UNPAID, SubscriptionStatus.PAUSED}
 
 _MONTHLY_USAGE_SQL = """
-SELECT count(*) FROM usage_logs
-WHERE tenant_id = $1::uuid
-  AND "timestamp" >= date_trunc('month', now(), 'UTC')
+SELECT
+    (SELECT count(*) FROM usage_logs
+     WHERE tenant_id = $1::uuid
+         AND "timestamp" >= date_trunc('month', now(), 'UTC'))
+    +
+    (SELECT count(*) FROM analysis_jobs
+     WHERE tenant_id = $1::uuid
+         AND status IN ('QUEUED', 'PROCESSING')
+         AND expires_at > now()
+         AND created_at >= date_trunc('month', now(), 'UTC'))
 """
 
 
@@ -34,7 +41,12 @@ class EntitlementService:
         self._pool = pool
         self._free_limit = free_tier_monthly_limit
 
-    async def check(self, tenant: TenantContext) -> Entitlement:
+    async def check(
+        self,
+        tenant: TenantContext,
+        *,
+        connection: asyncpg.Connection | None = None,
+    ) -> Entitlement:
         if tenant.plan is Plan.PRO and tenant.subscription_status in _PRO_ACTIVE:
             return Entitlement(allowed=True, billable=True)
 
@@ -48,7 +60,8 @@ class EntitlementService:
             )
 
         # Free-Tarif (oder Pro, dessen Erstzahlung noch aussteht): Monatskontingent.
-        used = await self._pool.fetchval(_MONTHLY_USAGE_SQL, tenant.tenant_id)
+        database = connection if connection is not None else self._pool
+        used = await database.fetchval(_MONTHLY_USAGE_SQL, tenant.tenant_id)
         if used >= self._free_limit:
             return Entitlement(
                 allowed=False,

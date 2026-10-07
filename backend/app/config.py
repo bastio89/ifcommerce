@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     anthropic_server_fallbacks: bool = True
 
     max_ticket_chars: int = 20_000
+    max_request_body_bytes: int = Field(default=256 * 1024, ge=8 * 1024, le=10 * 1024 * 1024)
+    analysis_sync_wait_seconds: float = Field(default=1.5, ge=0.0, le=30.0)
+    analysis_worker_concurrency: int = Field(default=1, ge=1, le=16)
+    analysis_max_pending_per_tenant: int = Field(default=100, ge=1, le=10_000)
+    analysis_job_lease_seconds: float = Field(default=120.0, gt=0.0)
+    analysis_job_max_attempts: int = Field(default=3, ge=1, le=10)
+    analysis_job_poll_interval_seconds: float = Field(default=0.2, gt=0.0)
+    analysis_job_retention_days: int = Field(default=7, ge=1, le=90)
 
     # --- Billing / Stripe ---
     stripe_secret_key: SecretStr | None = None
@@ -90,8 +98,8 @@ class Settings(BaseSettings):
     # NoDecode: Wert kommt als "*" oder "https://a.de,https://b.de", nicht als JSON.
     cors_allow_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
     api_key_cache_ttl_seconds: float = 15.0
-    rate_limit_secret_key_per_minute: int = 600
-    rate_limit_publishable_key_per_minute: int = 60
+    rate_limit_secret_key_per_minute: int = Field(default=600, ge=1)
+    rate_limit_publishable_key_per_minute: int = Field(default=60, ge=1)
 
     @field_validator("systemone_base_url")
     @classmethod

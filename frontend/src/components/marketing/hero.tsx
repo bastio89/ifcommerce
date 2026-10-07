@@ -31,13 +31,12 @@ export function Hero() {
             <ArrowRight className="size-3.5" aria-hidden />
           </a>
           <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl lg:text-[3.5rem] lg:leading-[1.05]">
-            <span className="text-gradient">Semantische If‑Statements für deinen Support.</span>{" "}
-            <span className="text-gradient-accent">90% günstiger als klassische LLMs.</span>
+            <span className="text-gradient">Strukturierte Triage für E-Commerce-Support.</span>
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-secondary">
-            DecideCommerce liest jedes Ticket und jede E-Mail deines Shops und liefert in einem einzigen Durchlauf eine
-            strukturierte Entscheidung: Kategorie, Dringlichkeit, Storno-Wunsch und Bestellnummer. Ohne Prompt-Basteln,
-            ohne Fließtext und mit DSGVO-Schutzschicht.
+            DecideCommerce liest Support-Nachrichten und liefert eine strukturierte Einschätzung: Kategorie,
+            Dringlichkeit, Storno-Wunsch und Bestellnummer. Erkannte personenbezogene Daten werden vor dem Modellaufruf
+            lokal maskiert; eine vollständige Erkennung kann nicht garantiert werden.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             <ButtonLink href="/signup" size="lg">
@@ -50,7 +49,7 @@ export function Hero() {
           </div>
           <ul className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-[13px] text-muted">
             <li className="flex items-center gap-2">
-              <ShieldCheck className="size-4 text-good" aria-hidden /> PII wird vor der KI anonymisiert
+              <ShieldCheck className="size-4 text-good" aria-hidden /> Erkannte PII-Muster werden lokal maskiert
             </li>
             <li className="flex items-center gap-2">
               <Zap className="size-4 text-accent-strong" aria-hidden /> Ein API-Call, ein Entscheidungsobjekt

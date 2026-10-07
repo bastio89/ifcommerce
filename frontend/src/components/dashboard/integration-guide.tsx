@@ -16,13 +16,17 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 const HIDDEN_FIELDS = [
-  ["dc_status", "ok | error | timeout", "Ergebnis der Analyse. Bei Fehlern wird das Formular trotzdem gesendet."],
+  ["dc_status", "ok | degraded | queued | processing | error | timeout", "Ergebnis oder Status der Analyse."],
   ["dc_category", "WHERE_IS_MY_ORDER …", "Eine der fünf Kategorien."],
   ["dc_urgency", "1 – 5", "5 = Kundenwut oder rechtliche Drohung."],
   ["dc_is_cancellation_request", "true | false", "Sofortiger Stornierungswunsch."],
   ["dc_contains_order_number", "true | false", "Nachricht enthält eine Bestellnummer."],
   ["dc_confidence", "0.0 – 1.0", "Sicherheit der Klassifikation."],
   ["dc_analysis_id", "ana_…", "Referenz für Support-Anfragen."],
+  ["dc_degraded", "true | false", "True, wenn die Heuristik statt des Modells entschieden hat."],
+  ["dc_job_id", "job_…", "Job-ID für eine spätere Statusabfrage."],
+  ["dc_status_url", "/api/v1/analysis-jobs/…", "Status-URL für das Shop-Backend."],
+  ["dc_idempotency_key", "…", "Schützt Wiederholungen vor doppelten Analysen."],
 ];
 
 export function IntegrationGuide({ appUrl, apiUrl }: { appUrl: string; apiUrl: string }) {
@@ -50,6 +54,14 @@ export function IntegrationGuide({ appUrl, apiUrl }: { appUrl: string; apiUrl: s
   }
 });`,
       },
+  {
+    title: "AJAX · langsame Analyse abwarten",
+        code: `document.addEventListener("decidecommerce:processing", (event) => {
+  const job = event.detail;
+  // Jobreferenz im Helpdesk speichern; das Widget pollt und sendet später "decidecommerce:decision".
+  console.log(job.id, job.status_url);
+});`,
+  },
     ],
     rest: [
       {
@@ -67,16 +79,30 @@ export function IntegrationGuide({ appUrl, apiUrl }: { appUrl: string; apiUrl: s
     node: [
       {
         title: "Node.js 18+ · fetch",
-        code: `const response = await fetch("${apiUrl}/api/v1/analyze-ticket", {
+        code: `const API_URL = "${apiUrl}";
+const headers = {
+  "x-api-key": process.env.DECIDECOMMERCE_API_KEY,
+  "content-type": "application/json",
+  "Idempotency-Key": crypto.randomUUID(),
+};
+const response = await fetch(API_URL + "/api/v1/analyze-ticket", {
   method: "POST",
-  headers: {
-    "x-api-key": process.env.DECIDECOMMERCE_API_KEY,
-    "content-type": "application/json",
-  },
+  headers,
   body: JSON.stringify({ text: ticket.body, external_id: ticket.id }),
 });
-if (!response.ok) throw new Error((await response.json()).error.message);
-const decision = await response.json();
+let decision = await response.json();
+if (response.status === 202) {
+  let job;
+  do {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    const poll = await fetch(API_URL + decision.status_url, { headers });
+    job = await poll.json();
+  } while (["queued", "processing"].includes(job.status));
+  if (!job.result) throw new Error(job.error?.message ?? "Analyse fehlgeschlagen");
+  decision = job.result;
+} else if (!response.ok) {
+  throw new Error(decision.error.message);
+}
 
 if (decision.flags.is_cancellation_request) await holdShipment(ticket.orderId);
 if (decision.urgency >= 4) await assignTo(ticket.id, "senior-support");`,
@@ -86,16 +112,32 @@ if (decision.urgency >= 4) await assignTo(ticket.id, "senior-support");`,
       {
         title: "Python · httpx",
         code: `import os
+    import time
 import httpx
 
-response = httpx.post(
-    "${apiUrl}/api/v1/analyze-ticket",
-    headers={"x-api-key": os.environ["DECIDECOMMERCE_API_KEY"]},
+    api_url = "${apiUrl}"
+    headers = {"x-api-key": os.environ["DECIDECOMMERCE_API_KEY"]}
+    response = httpx.post(
+      f"{api_url}/api/v1/analyze-ticket",
+      headers=headers,
     json={"text": ticket_body, "external_id": ticket_id},
-    timeout=10,
+      timeout=5,
 )
-response.raise_for_status()
 decision = response.json()
+    if response.status_code == 202:
+      job = decision
+      while True:
+        time.sleep(job.get("retry_after_seconds", 1))
+        job_response = httpx.get(f"{api_url}{job['status_url']}", headers=headers, timeout=5)
+        job_response.raise_for_status()
+        job = job_response.json()
+        if job["status"] in {"succeeded", "degraded", "failed"}:
+          break
+      if not job.get("result"):
+        raise RuntimeError(job.get("error", {}).get("message", "Analyse fehlgeschlagen"))
+      decision = job["result"]
+    elif not response.is_success:
+      response.raise_for_status()
 
 if decision["category"] == "WHERE_IS_MY_ORDER" and decision["flags"]["contains_order_number"]:
     send_tracking_macro(ticket_id)`,

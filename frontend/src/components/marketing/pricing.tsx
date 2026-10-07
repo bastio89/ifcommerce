@@ -73,7 +73,7 @@ export function Pricing({ freeLimit }: { freeLimit: number }) {
         ))}
       </div>
       <p className="mt-8 text-center text-[13px] text-muted">
-        Agentur oder mehr als 1 Mio. Tickets im Monat? Wir bieten individuelle Konditionen, SSO und AV-Vertrag.
+        Größeres Volumen oder individuelle Integration? Sprich mit uns über einen passenden Pilotumfang.
       </p>
     </section>
   );

@@ -62,6 +62,16 @@ def test_english_sign_off_and_intro() -> None:
     assert result.text == "Hi, this is [ANONYMOUS_NAME]. Call me at [ANONYMOUS_PHONE].\nBest,\n[ANONYMOUS_NAME]"
 
 
+def test_unicode_surnames_are_masked() -> None:
+    result = scrub_pii("My name is Łukasz Wójcik.\nViele Grüße\nSarah Yılmaz")
+
+    assert "Łukasz" not in result.text
+    assert "Wójcik" not in result.text
+    assert "Sarah" not in result.text
+    assert "Yılmaz" not in result.text
+    assert result.entities["NAME"] == 2
+
+
 def test_nul_bytes_cannot_corrupt_reference_protection() -> None:
     result = scrub_pii("Bestellung 12345 \x000\x00 test@example.com")
     assert "\x00" not in result.text

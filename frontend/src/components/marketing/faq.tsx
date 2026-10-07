@@ -6,8 +6,8 @@ const faqs = [
     a: "Statt eine Antwort zu formulieren, trifft das Modell nur eine strukturierte Entscheidung in einem festen Schema. Das ist schneller, günstiger und für Automationen verlässlicher als frei generierter Text.",
   },
   {
-    q: "Ist das DSGVO-konform?",
-    a: "Personenbezogene Daten (E-Mails, Telefonnummern, Namen, Adressen, IBANs, Kartennummern, IPs) werden lokal anonymisiert, bevor der Text an ein KI-Modell geht. Die Analyse-Logs enthalten nur Metadaten wie Kategorie und Dringlichkeit, keine Ticket-Inhalte.",
+    q: "Wie werden personenbezogene Daten behandelt?",
+    a: "Vor dem Modellaufruf versucht eine lokale Schutzschicht ausgewählte Muster zu maskieren. Sie erkennt nicht jede personenbezogene Angabe; die Inhalte können daher weiterhin personenbezogen sein. Analysejobs und Ergebnisse einschließlich maskiertem Text werden standardmäßig bis zu sieben Tage gespeichert. Die Angaben ersetzen keine Datenschutzprüfung.",
   },
   {
     q: "Was passiert, wenn die KI ausfällt?",
@@ -15,11 +15,11 @@ const faqs = [
   },
   {
     q: "Funktioniert das mit meinem Shopsystem?",
-    a: "Das Widget arbeitet mit jedem HTML-Kontaktformular (Shopify, Shopware, WooCommerce, Magento, JTL, eigene Shops). Helpdesks wie Zendesk oder Freshdesk binden die REST-API per Webhook oder Automation an.",
+    a: "Das Widget ist für Standard-HTML-Kontaktformulare gedacht. Für Helpdesks wie Zendesk oder Freshdesk gibt es eine REST-API, aber keinen nativen Connector; die konkrete Automation muss im Helpdesk eingerichtet werden.",
   },
   {
     q: "Wie wird abgerechnet?",
-    a: "Free ist kostenlos bis zum Monatskontingent. Pro kostet eine feste Grundgebühr plus einen Betrag pro Analyse oberhalb des Inklusivvolumens. Gezählt werden nur erfolgreiche Analysen, abgerechnet monatlich über Stripe.",
+    a: "Free ist kostenlos bis zum Monatskontingent. Pro kostet eine feste Grundgebühr plus einen Betrag pro abrechenbarer Analyse oberhalb des Inklusivvolumens. Ergebnisse mit Heuristik-Fallback (degraded) werden nicht nutzungsbasiert abgerechnet.",
   },
 ];
 

@@ -98,7 +98,7 @@ export function DecisionSummary({ result }: { result: AnalyzeResult }) {
         {result.degraded && <Badge tone="warning">Fallback aktiv</Badge>}
         {piiEntries.length > 0 ? (
           <Badge tone="good">
-            DSGVO: {piiEntries.map(([kind, count]) => `${count}× ${kind}`).join(", ")} anonymisiert
+            Maskiert: {piiEntries.map(([kind, count]) => `${count}× ${kind}`).join(", ")}
           </Badge>
         ) : (
           <Badge>Keine personenbezogenen Daten gefunden</Badge>

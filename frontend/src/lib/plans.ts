@@ -10,7 +10,7 @@ export const PLAN_FEATURES = {
   FREE: [
     "Bis zu {limit} Analysen pro Monat",
     "Alle 5 Kategorien, Dringlichkeit & Intent-Flags",
-    "DSGVO-Schutzschicht (PII-Anonymisierung)",
+    "Lokale Maskierung erkannter PII-Muster",
     "JavaScript-Widget & REST-API",
     "Community-Support",
   ],

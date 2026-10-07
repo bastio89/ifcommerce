@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import uuid
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request, Response, Security
+from fastapi.responses import JSONResponse
 
 from app.container import Container
 from app.decision.pipeline import AnalysisResult
-from app.schemas import AnalyzeTicketRequest, AnalyzeTicketResponse, ErrorResponse, PiiReport, TicketFlags
-from app.services.usage import UsageDetails
+from app.schemas import (
+    AnalysisJobAccepted,
+    AnalyzeTicketRequest,
+    AnalyzeTicketResponse,
+    ErrorResponse,
+    PiiReport,
+    TicketFlags,
+)
+from app.security import API_KEY_HEADER
+from app.services.analysis_jobs import AnalysisJobError
 
 router = APIRouter(prefix="/api/v1", tags=["Decision API"])
 
@@ -34,17 +44,26 @@ def to_response(result: AnalysisResult, external_id: str | None) -> AnalyzeTicke
 
 @router.post(
     "/analyze-ticket",
-    response_model=AnalyzeTicketResponse,
+    response_model=AnalyzeTicketResponse | AnalysisJobAccepted,
     summary="Ticket/E-Mail in Echtzeit klassifizieren",
     responses={
+        202: {"model": AnalysisJobAccepted, "description": "Analyse läuft asynchron weiter"},
         401: {"model": ErrorResponse, "description": "API-Key fehlt oder ist ungültig"},
         402: {"model": ErrorResponse, "description": "Kontingent erschöpft oder Abo inaktiv"},
         403: {"model": ErrorResponse, "description": "Origin für Publishable Key nicht freigegeben"},
+        409: {"model": ErrorResponse, "description": "Idempotency-Key wurde mit anderem Inhalt wiederverwendet"},
         413: {"model": ErrorResponse, "description": "Text zu lang"},
         429: {"model": ErrorResponse, "description": "Rate-Limit erreicht"},
+        503: {"model": ErrorResponse, "description": "Analyse konnte nicht abgeschlossen werden"},
     },
 )
-async def analyze_ticket(payload: AnalyzeTicketRequest, request: Request) -> AnalyzeTicketResponse:
+async def analyze_ticket(
+    payload: AnalyzeTicketRequest,
+    request: Request,
+    response: Response,
+    api_key: Annotated[str | None, Security(API_KEY_HEADER)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key", max_length=200)] = None,
+) -> AnalyzeTicketResponse | AnalysisJobAccepted | JSONResponse:
     # Authentifizierung, Mandanten-Zuordnung und Kontingent hat die ApiKeyAuthMiddleware
     # bereits erledigt (request.state.tenant).
     container: Container = request.app.state.container
@@ -55,13 +74,46 @@ async def analyze_ticket(payload: AnalyzeTicketRequest, request: Request) -> Ana
             detail=f"Der Text darf maximal {container.settings.max_ticket_chars} Zeichen lang sein.",
         )
 
-    result = await container.pipeline.analyze(payload.text, payload.subject)
+    tenant = request.state.tenant
+    try:
+        job = await container.analysis_jobs.submit(
+            tenant,
+            api_key_id=request.state.api_key_id,
+            text=payload.text,
+            subject=payload.subject,
+            external_id=payload.external_id,
+            idempotency_key=idempotency_key,
+        )
+    except AnalysisJobError as exc:
+        headers = {"retry-after": "1"} if exc.code == "analysis_queue_full" else None
+        return JSONResponse(
+            {"error": {"code": exc.code, "message": exc.message}},
+            status_code=exc.status_code,
+            headers=headers,
+        )
 
-    # Wird von der Middleware nach erfolgreicher Antwort in usage_logs geschrieben.
-    request.state.usage_details = UsageDetails(
-        category=result.decision.category.value,
-        urgency=result.decision.urgency,
-        engine=result.engine,
-        latency_ms=result.latency_ms,
+    request.state.usage_handled = True
+    job = (
+        await container.analysis_jobs.wait(
+            job.public_id,
+            tenant.tenant_id,
+            container.settings.analysis_sync_wait_seconds,
+        )
+        or job
     )
-    return to_response(result, payload.external_id)
+    if job.status in {"SUCCEEDED", "DEGRADED"} and job.result is not None:
+        response.status_code = 200
+        return AnalyzeTicketResponse.model_validate(job.result)
+    if job.status == "FAILED":
+        return JSONResponse(
+            {"error": {"code": "analysis_failed", "message": "Analyse konnte nicht abgeschlossen werden."}},
+            status_code=503,
+        )
+
+    response.status_code = 202
+    response.headers["Retry-After"] = "1"
+    return AnalysisJobAccepted(
+        id=job.public_id,
+        status=job.status.lower(),
+        status_url=f"/api/v1/analysis-jobs/{job.public_id}",
+    )

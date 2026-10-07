@@ -5,8 +5,8 @@ import { SectionHeading } from "@/components/marketing/section-heading";
 const features = [
   {
     icon: Layers,
-    title: "Fünf Kategorien, ein Schema",
-    text: "WHERE_IS_MY_ORDER, RETURN_OR_REFUND, PRODUCT_ISSUE, PAYMENT_OR_INVOICE und GENERAL_INQUIRY. Stabil versioniert, perfekt für Automationen.",
+    title: "Fünf E-Commerce-Kategorien",
+    text: "WHERE_IS_MY_ORDER, RETURN_OR_REFUND, PRODUCT_ISSUE, PAYMENT_OR_INVOICE und GENERAL_INQUIRY im festen API-Schema.",
   },
   {
     icon: Gauge,
@@ -20,8 +20,8 @@ const features = [
   },
   {
     icon: Plug,
-    title: "Plug & Play",
-    text: "Ein Script-Tag im Kontaktformular oder ein REST-Call aus deinem Helpdesk. Shopify, Shopware, WooCommerce, Zendesk, Freshdesk.",
+    title: "Widget und REST-API",
+    text: "Das Widget bindet Standard-HTML-Formulare an. Helpdesks lassen sich über ihre REST- oder Automationsfunktionen integrieren; native Connectoren sind nicht enthalten.",
   },
   {
     icon: Building2,

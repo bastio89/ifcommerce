@@ -1,6 +1,8 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from app.config import Settings
+from app.main import create_app
 
 
 @pytest.mark.parametrize(
@@ -52,3 +54,10 @@ def test_systemone_base_url_is_validated() -> None:
     assert Settings(systemone_base_url="http://ollama:11434/\n").systemone_base_url == "http://ollama:11434"
     with pytest.raises(ValueError, match="http"):
         Settings(systemone_base_url="ollama:11434")
+
+
+def test_production_rejects_default_internal_secret() -> None:
+    app = create_app(Settings(environment="production", internal_api_secret="change-me-local-development-secret"))
+
+    with pytest.raises(RuntimeError, match="INTERNAL_API_SECRET"), TestClient(app):
+        pass

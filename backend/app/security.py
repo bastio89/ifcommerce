@@ -14,7 +14,15 @@ import hashlib
 import hmac
 import re
 
+from fastapi.security import APIKeyHeader
+
 API_KEY_PATTERN = re.compile(r"^dc_(?P<kind>sk|pk)_[A-Za-z0-9]{40}$")
+API_KEY_HEADER = APIKeyHeader(
+    name="x-api-key",
+    scheme_name="ApiKeyAuth",
+    description="Secret API key (dc_sk_) or origin-bound publishable key (dc_pk_).",
+    auto_error=False,
+)
 
 
 def looks_like_api_key(raw: str) -> bool:
